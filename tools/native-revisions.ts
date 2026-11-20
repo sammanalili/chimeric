@@ -3,6 +3,7 @@ const linuxSymbols: Record<string,string> = {
   PP:'W1',cIt:'bIt',Dp:'ep',Ugs:'o_s',ERe:'zAe','$G':'a3',Fma:'Oma',hre:'yre',BFr:'aLr',
   oyt:'myt',Yat:'slt',qR:'UA',d9:'g2',Ahe:'Rme',pJc:'sed',kb:'Sb',Qxs:'wvs',
   dir:'xir',Oqn:'V3n',pu:'pu',AP:'P1',uR:'pA',Q_s:'mys',
+  Eei:'cti',zjn:'oKn',
   Y6:'XK',g3t:'k$t',Vrr:'sor',
 };
 

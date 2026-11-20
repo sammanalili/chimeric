@@ -1,54 +1,68 @@
 {
-  "date": "2026-10-29",
-  "platform": "macOS arm64",
-  "bun": "1.4.3",
-  "python": "3.14.7",
-  "scope": "Integration source, network policy and exporter checks; application release gates are tracked separately.",
-  "cleanInstall": {
-    "command": "bun install --frozen-lockfile --ignore-scripts",
-    "exitCode": 0,
-    "packagesInstalled": 107
+  "schemaVersion": 1,
+  "version": "0.3.0-rc.1",
+  "reviewedOn": "2026-11-20",
+  "scope": "Frozen development source, 292-file clean export boundary, designated macOS wired17 candidate, Linux x64 candidate, and exact local scan of both packaged forms. Open platform, isolation, notarization and rights gates remain separate.",
+  "development": {
+    "bun": {"passed": 964, "failed": 0, "assertions": 5982, "files": 96},
+    "python": {"total": 61, "failed": 0}
   },
-  "transportTests": {
-    "command": "bun test",
-    "exitCode": 0,
-    "passed": 60,
-    "failed": 0,
-    "assertions": 246,
-    "files": 11
+  "cleanExport": {
+    "candidate": "final clean export recorded outside the source tree",
+    "selectedSourceFiles": 292,
+    "bun": {"passed": 901, "skipped": 63, "failed": 0, "assertions": 5254, "files": 96},
+    "python": {"total": 61, "skipped": 4, "failed": 0},
+    "strictReleaseCheck": "passed",
+    "skips": "Tests requiring the separately supplied original native runtime or asset fixtures. Those fixtures and every private profile are excluded from the source export."
   },
-  "sourceExport": {
-    "positiveManifest": true,
-    "strictTreeFindings": [],
-    "privateDeploymentMarkerFindings": [],
-    "originalRuntimeIncluded": false,
-    "privateProfileIncluded": false,
-    "canonicalRequiredBoundary": true,
-    "stagedAndRenamedFileHashesChecked": true
+  "macCandidate": {
+    "path": "work/release-goal-20261120/macos-rc-resource-wired17/Chimeric.app",
+    "architecture": "arm64",
+    "freshProfileOAuthConfigured": false,
+    "isolatedVerifier": "passed",
+    "providerCallsDuringVerifier": 0,
+    "officialClientInvocationsDuringVerifier": 0,
+    "priorSeededPersistenceEvidence": {"candidate": "wired16", "projects": 1, "frames": 9, "artifacts": 21, "artifactVersions": 21, "countsUnchangedAfterStopRestart": true, "seedErrors": 0},
+    "codesign": "ad-hoc; deep strict verification passed",
+    "notarized": false
   },
-  "negativeControls": [
-    "private files inside selected source rejected",
-    "symlinks to private files rejected",
-    "source manifest omissions rejected",
-    "stale destinations preserved",
-    "invalid links rejected",
-    "credential-pattern reports redact matched values",
-    "staged mutation aborts publication",
-    "Vendor analytics and crash destinations rejected before dispatch; custom provider input preserved",
-    "Malformed launcher arguments and non-loopback session URLs rejected"
-  ],
-  "ci": {
-    "configured": true,
-    "githubRunVerified": false,
-    "permissions": "contents:read",
-    "actionsPinnedByCommit": true
+  "securityScan": {
+    "record": "work/release-goal-20261120/final-release-scan.json",
+    "source": {"fileCount": 292, "sha256Location": "external scan record; omitted here to avoid a self-referential source hash"},
+    "artifacts": {
+      "macAppDirectory": {"sha256": "d1c35e642b2132d5d8b658188090e4f06a1897d8cefc11f3646cb6d5f7361cb3"},
+      "macZip": {"sha256": "886ed2deaf24c934324da9b7789de23818f1456cd23ff3595c2c8a6a4f6df0c9"},
+      "linuxX64Directory": {"sha256": "89444dab20381ff390df5722102a3557edcb5313527c1e6ea17e93b0c16148fe"},
+      "linuxX64Tarball": {"sha256": "6b2ef110486479a12a623a06fa4026305497d2afd3139d43fc74c4709cf48ea9"}
+    },
+    "gitleaks": {"version": "8.30.1", "unreviewedFindings": 0, "reviewedFindings": 2},
+    "clamav": {"version": "1.5.5", "database": 28188, "scannedFilesLocation": "external scan record", "infectedFiles": 0, "errors": 0},
+    "limits": "Pattern and signature scans do not inspect Git history, prove the absence of malware or vulnerabilities, verify runtime confinement, or authorize redistribution."
   },
-  "observedTestInstrumentCorrection": "The staged-mutation test initially matched the original temp source due to macOS /var and /private/var aliases. Resolving both paths corrected the target before its confirmatory run.",
-  "publicationTests": {
-    "command": "python3 -m unittest discover -s tests -p 'test_*.py'",
-    "exitCode": 0,
-    "passed": 15,
-    "failed": 0,
-    "scope": "Source exclusion, manifest completeness, race control, archive/tree integrity and negative controls."
-  }
+  "linux": {
+    "status": "partial",
+    "priorEvidence": "Linux x64 package hashes, native executables and version command passed on Ubuntu 24.04 x86_64. AppArmor blocked the user namespace before service startup.",
+    "finalCandidate": "work/release-goal-20261120/linux-rc-current4",
+    "finalCandidateScan": "passed: zero unreviewed Gitleaks findings; combined source and packaged-directory ClamAV scan covered 2209 nonempty files with zero detections and zero errors",
+    "executionVerified": false,
+    "reason": "The rebuilt JavaScript runtime and asset tree have not completed a native Linux research-harness run."
+  },
+  "brandLanguage": {
+    "status": "partial",
+    "reason": "Checked app-owned branding transformations and focused tests pass, but the complete packaged signed-out, error, help-link and Japanese walkthrough is not recorded."
+  },
+  "openReleaseGates": [
+    "full-restore-research-round-trip",
+    "packaged-isolation",
+    "mac-notarization",
+    "protected-research",
+    "portable-files",
+    "linux-docker",
+    "wsl",
+    "architecture-coverage",
+    "voice-portability",
+    "brand-language",
+    "runtime-distribution",
+    "final-release-audit"
+  ]
 }

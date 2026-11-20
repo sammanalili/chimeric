@@ -1,5 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import { parseArgs, redacted, validateSessionUrl } from '../tools/launcher.mjs';
+import { parseArgs, redacted, validateSessionUrl, versionInfo } from '../tools/launcher.mjs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+test('packaged and source launchers report the declared release version', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'chimeric-version-'));
+  const resources = join(dir, 'resources');
+  mkdirSync(resources);
+  try {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({version: '0.2.0-rc.1'}));
+    expect(versionInfo(resources)).toEqual({version: '0.2.0-rc.1', runtimeVersion: '0.1.71'});
+    writeFileSync(join(resources, 'chimeric-version.json'), JSON.stringify({version: '0.3.0'}));
+    expect(versionInfo(resources).version).toBe('0.3.0');
+    writeFileSync(join(resources, 'chimeric-version.json'), JSON.stringify({version: 'invalid'}));
+    expect(() => versionInfo(resources)).toThrow('Invalid Chimeric release version');
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
 
 describe('launcher argument parsing', () => {
   test('accepts all actions and explicit values', () => {

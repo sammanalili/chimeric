@@ -14,6 +14,14 @@ export function installProviderHttp(app:any,manager:ProviderManager,moduleVersio
   app.get('/api/local/connections',handle(()=>manager.snapshot()));
   app.post('/api/local/connections',handle(request=>manager.upsert(request.body)));
   app.post('/api/local/connections/preview',handle(request=>manager.preview(request.body)));
+  const probe=(single=false)=>async(request:any,reply:any)=>{
+    try{
+      const body=single?z.object({expectedRevision:z.number(),connectionRevision:z.string(),modelId:z.string()}).parse(request.body):request.body;
+      const result=await manager.probe({...body,id:request.params.id});return reply.code(202).send(result);
+    }catch(error){const status=error instanceof ProviderChangeError?error.status:400;return reply.code(status).send({detail:manager.registry.safeError(error)})}
+  };
+  app.post('/api/local/connections/:id/probe',probe());
+  app.post('/api/local/connections/:id/models/probe',probe(true));
   app.put('/api/local/connections/settings',handle(request=>manager.settings(request.body)));
   app.delete('/api/local/connections/:id',handle(request=>manager.remove({...request.body,id:request.params.id})));
   app.get('/api/local/providers/component.js',async(_request:any,reply:any)=>{
@@ -21,6 +29,7 @@ export function installProviderHttp(app:any,manager:ProviderManager,moduleVersio
       .replaceAll('?science_local=chatgpt-v1',moduleVersion);
     return reply.type('text/javascript; charset=utf-8').header('cache-control','no-store').send(script);
   });
+  app.get('/api/local/connections/events.js',async(_request:any,reply:any)=>reply.type('text/javascript; charset=utf-8').header('cache-control','no-store').send(readFileSync(new URL('./provider-events.js',import.meta.url),'utf8')));
   const streams=new Set<any>();
   app.get('/api/local/connections/events',async(_request:any,reply:any)=>{
     if(streams.size>=100)return reply.code(429).send({detail:'Too many live connection watchers.'});
@@ -31,5 +40,5 @@ export function installProviderHttp(app:any,manager:ProviderManager,moduleVersio
     const heartbeat=setInterval(()=>{if(!stream.destroyed&&!stream.writableEnded&&!stream.write(': keep-alive\n\n'))stream.end()},20_000);heartbeat.unref();
     stream.once('close',()=>{clearInterval(heartbeat);remove();streams.delete(stream)});
   });
-  app.addHook('onClose',async()=>{for(const stream of streams)stream.end()});
+  app.addHook('onClose',async()=>{await manager.close();for(const stream of streams)stream.end()});
 }

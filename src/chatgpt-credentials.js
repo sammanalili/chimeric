@@ -9,8 +9,9 @@ async function api(method='GET',body){
 }
 export function ChatGPTCredentials(){
  const client=useQueryClient();
- const [status,setStatus]=React.useState(null),[error,setError]=React.useState(''),[busy,setBusy]=React.useState(false);
+ const [status,setStatus]=React.useState(null),[error,setError]=React.useState(''),[busy,setBusy]=React.useState(false),[checking,setChecking]=React.useState(false);
  const waiting=['preparing','waiting'].includes(status?.login?.phase);
+ const discovering=status?.modelDiscovery?.state==='refreshing';
  const connected=React.useRef(undefined);
  const update=React.useCallback(value=>{
   if(connected.current!==undefined&&connected.current!==value.connected)client.invalidateQueries();
@@ -19,22 +20,31 @@ export function ChatGPTCredentials(){
  React.useEffect(()=>{
   let alive=true,timer;
   const poll=async()=>{
-   try{const value=await api();if(!alive)return;update(value);setError('');timer=setTimeout(poll,waiting?1000:30_000);}
+   try{const value=await api();if(!alive)return;update(value);setError('');timer=setTimeout(poll,waiting||discovering?1000:30_000);}
    catch{if(alive){setError(t('Could not read the ChatGPT connection. Retry or reopen Connections.'));timer=setTimeout(poll,10_000);}}
   };
   poll();return()=>{alive=false;clearTimeout(timer);};
- },[update,waiting]);
+ },[update,waiting,discovering]);
  const action=async body=>{
-  setBusy(true);setError('');
-  try{update(await api('POST',body));}catch(e){setError(e.message);}finally{setBusy(false);}
+  setBusy(true);setChecking(body.action==='check');setError('');
+  try{update(await api('POST',body));}catch(e){setError(e.message);}finally{setBusy(false);setChecking(false);}
  };
  const button=(label,onClick,disabled=false)=>jsx.jsx('button',{type:'button',onClick,disabled:busy||disabled,className:'rounded-md border border-border-300 px-3 py-1.5 text-sm hover:bg-bg-200 disabled:opacity-50',children:t(label)});
- return jsx.jsxs('section',{'aria-label':t('ChatGPT subscription'),className:'mb-5 border-b border-border-300 pb-4',children:[
-  jsx.jsx('h3',{className:'mb-1 text-sm font-medium text-text-100',children:t('Model subscriptions')}),
+ return jsx.jsxs('section',{'aria-label':t('ChatGPT subscription'),'data-testid':'chatgpt-subscription',className:'mb-3',children:[
   jsx.jsxs('div',{className:'rounded-lg border border-border-300 p-3',children:[
    jsx.jsxs('div',{className:'flex items-center justify-between gap-3',children:[
-    jsx.jsxs('div',{children:[jsx.jsx('div',{className:'text-sm font-medium text-text-100',children:t('ChatGPT subscription')}),jsx.jsx('p',{className:'mt-1 text-footnote text-text-400',role:'status',children:t(status?.connected?'Connected · GPT 6.1 Sol':status?.reauthRequired?'Sign-in expired · reconnect to continue':'Use your ChatGPT plan with GPT 6.1 Sol')})]}),
+    jsx.jsxs('div',{children:[jsx.jsx('div',{className:'text-sm font-medium text-text-100',children:t('ChatGPT subscription')}),jsx.jsx('p',{className:'mt-1 text-footnote text-text-400',role:'status',children:t(status?.connected?status.connectionCheck?.status==='passed'?'Signed in · connection verified':status.connectionCheck?.status==='failed'?'Signed in · connection check failed':'Signed in · connection not checked':status?.reauthRequired?'Sign-in expired · reconnect to continue':'Connect ChatGPT to discover models available to your account.')})]}),
     status?.connected?button('Disconnect',()=>action({action:'disconnect'})):button(status?.reauthRequired?'Reconnect ChatGPT':'Sign in with ChatGPT',()=>action({action:'start',method:'browser'}),waiting||!status),
+   ]}),
+   status?.connected&&jsx.jsxs('div',{className:'mt-3 space-y-2 text-sm',children:[
+    button(discovering?'Refreshing models…':'Refresh models',()=>action({action:'discover'}),discovering),
+    jsx.jsx('p',{role:'status',className:'text-footnote text-text-400',children:t('Discovered models')+': '+(status.modelDiscovery?.count??0)+(status.modelDiscovery?.fetchedAt?' · '+new Date(status.modelDiscovery.fetchedAt).toLocaleString():'')}),
+    jsx.jsx('p',{className:'text-footnote text-text-400',children:t('Models refresh automatically after sign-in. Available reasoning levels and image input come from the account catalog.')}),
+    status.modelDiscovery?.message&&jsx.jsx('p',{role:'status',children:t(status.modelDiscovery.message)}),
+    button(checking?'Checking connection…':'Check connection',()=>action({action:'check'})),
+    jsx.jsx('p',{className:'text-footnote text-text-400',children:t('Sends a short synthetic text request using your ChatGPT plan. No research content is included.')}),
+    status.connectionCheck?.message&&jsx.jsx('p',{role:'status',children:t(status.connectionCheck.message)}),
+    status.connectionCheck?.checkedAt&&jsx.jsx('p',{className:'text-footnote text-text-400',children:status.connectionCheck.model+' · '+new Date(status.connectionCheck.checkedAt).toLocaleString()}),
    ]}),
    !status?.connected&&!waiting&&button('Device code',()=>action({action:'start',method:'device_code'}),!status),
    waiting&&jsx.jsxs('div',{className:'mt-3 space-y-2 text-sm',children:[

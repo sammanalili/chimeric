@@ -1,9 +1,9 @@
 import {test,expect} from 'bun:test';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {runInNewContext} from 'node:vm';
-import {Localization,resolveLanguage} from '../src/localization';
+import {Localization,resolveLanguage,localize} from '../src/localization';
 
 test('System language follows supported browser preferences while an explicit choice overrides them',()=>{
  expect(resolveLanguage('system',['ja-JP','en-US'])).toBe('ja');
@@ -11,6 +11,17 @@ test('System language follows supported browser preferences while an explicit ch
  expect(resolveLanguage('system',['fr-FR','ja-JP'])).toBe('ja');
  expect(resolveLanguage('system',['fr-FR'])).toBe('en');
  expect(resolveLanguage('en',['ja-JP'])).toBe('en');expect(resolveLanguage('ja',['en-US'])).toBe('ja');
+});
+
+test('localize function translates known strings and cleanly falls back on unknown strings or en locale',()=>{
+ expect(localize('Language','ja')).toBe('言語');
+ expect(localize('Interface language','ja')).toBe('表示言語');
+ expect(localize('Choose a different connection ID.','ja')).toBe('別の接続IDを選択してください。');
+ expect(localize('Connection no longer exists.','ja')).toBe('指定された接続は存在しません。');
+ expect(localize('Approve','ja')).toBe('承認');
+ expect(localize('Discard','ja')).toBe('破棄');
+ expect(localize('Unknown Unregistered String','ja')).toBe('Unknown Unregistered String');
+ expect(localize('Language','en')).toBe('Language');
 });
 
 test('The actual bootstrap script detects Japanese and English and the saved System preference survives reload',async()=>{
@@ -30,5 +41,13 @@ test('The actual bootstrap script detects Japanese and English and the saved Sys
   const put=routes.get('PUT /api/local/ui/preferences')!;
   await put({body:{locale:'ja'}},reply);expect(new Localization(dir).locale).toBe('ja');
   await put({body:{locale:'system'}},reply);expect(new Localization(dir).locale).toBe('system');
+
+  // Test recovery from invalid json in ui-preferences.json
+  writeFileSync(join(dir,'ui-preferences.json'),'{invalid-json');
+  expect(new Localization(dir).locale).toBe('system');
+
+  // Test recovery from unsupported locale
+  writeFileSync(join(dir,'ui-preferences.json'),JSON.stringify({locale:'fr'}));
+  expect(new Localization(dir).locale).toBe('system');
  }finally{rmSync(dir,{recursive:true,force:true})}
 });

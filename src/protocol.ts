@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import type { AssistantMessage, Context, Message, Tool } from "@earendil-works/pi-ai";
 import type { ModelEntry } from "./registry";
 import { ContentReader } from "./content";
+import {FABLE_5_2_ID,anthropicConfigurationError} from "./anthropic-compat";
 
 export const zeroUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
 export const stopReason = (reason: string) => reason === "toolUse" ? "tool_use" : reason === "length" ? "max_tokens" : "end_turn";
@@ -29,23 +30,26 @@ function semanticContent(content: any[]) {
   return content.filter(b => ["text", "tool_use", "server_tool_use"].includes(b.type)).map(b => b.type === "text"
     ? { type: "text", text: b.text } : { type: "tool_use", id: b.id, name: b.name, input: b.input });
 }
+const stableContent=(value:any):any=>Array.isArray(value)?value.map(stableContent):value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(key=>[key,stableContent(value[key])])):value;
 export class ReplayStore {
   private db: Database;
   constructor(path: string) {
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS replay (key TEXT PRIMARY KEY, model TEXT NOT NULL, message TEXT NOT NULL, created INTEGER NOT NULL)");
+    this.db.exec("CREATE TABLE IF NOT EXISTS strict_replay (key TEXT PRIMARY KEY, model TEXT NOT NULL, message TEXT NOT NULL, created INTEGER NOT NULL)");
     this.db.query('DELETE FROM replay WHERE created < ?').run(Date.now()-7*24*60*60*1000);
   }
-  key(content: any[], model: string) { return createHash("sha256").update(model + "\n" + JSON.stringify(semanticContent(content))).digest("hex"); }
+  key(content: any[], model: string) { return createHash("sha256").update(model + "\n" + JSON.stringify(/(?:^|::)claude-fable-5-2(?:@|$)/.test(model)?stableContent(content):semanticContent(content))).digest("hex"); }
+  private table(model:string){return /(?:^|::)claude-fable-5-2(?:@|$)/.test(model)?"strict_replay":"replay"}
   put(content: any[], model: string, message: AssistantMessage) {
-    this.db.query("INSERT OR REPLACE INTO replay VALUES(?,?,?,?)").run(this.key(content, model), model, JSON.stringify(message), Date.now());
+    this.db.query("INSERT OR REPLACE INTO "+this.table(model)+" VALUES(?,?,?,?)").run(this.key(content, model), model, JSON.stringify(message), Date.now());
     this.db.exec('DELETE FROM replay WHERE key IN (SELECT key FROM replay ORDER BY created DESC LIMIT -1 OFFSET 1000)');
   }
   get(content: any[], model: string): AssistantMessage | undefined {
-    const row = this.db.query("SELECT message FROM replay WHERE key=?").get(this.key(content, model)) as any;
+    const row = this.db.query("SELECT message FROM "+this.table(model)+" WHERE key=?").get(this.key(content, model)) as any;
     return row ? JSON.parse(row.message) : undefined;
   }
-  clear() { this.db.exec('PRAGMA secure_delete=ON; DELETE FROM replay; PRAGMA wal_checkpoint(TRUNCATE)'); }
+  clear() { this.db.exec('PRAGMA secure_delete=ON; DELETE FROM replay; DELETE FROM strict_replay; PRAGMA wal_checkpoint(TRUNCATE)'); }
 }
 
 export async function toContext(body: any, model: ModelEntry, reader: ContentReader, replay: ReplayStore, signal?: AbortSignal): Promise<Context> {
@@ -64,6 +68,7 @@ export async function toContext(body: any, model: ModelEntry, reader: ContentRea
         for (const item of cached.content) if (item.type === "toolCall") names.set(item.id, item.name);
         continue;
       }
+      if(model.api==='anthropic-messages'&&model.id===FABLE_5_2_ID&&blocks.some(block=>['thinking','redacted_thinking'].includes(block.type)))throw anthropicConfigurationError('The original Fable session history and effort metadata are unavailable. Restore the original Chimeric history or start a new conversation.');
       const content: any[] = [];
       for (const block of blocks) {
         if (block.type === "text") content.push({ type: "text", text: String(block.text ?? "") });
@@ -77,6 +82,7 @@ export async function toContext(body: any, model: ModelEntry, reader: ContentRea
           if(content.length) messages.push({ role: "assistant", content: content.splice(0), api: "anthropic-messages", provider: "native-history", model: "native-history", usage: zeroUsage(), stopReason: "toolUse", timestamp: 0 });
           messages.push({ role: "toolResult", toolCallId: id, toolName: name, content: [{type:"text",text:serverResultText(block.content)}], isError: block.is_error === true, timestamp:0 });
         } else if (["thinking", "redacted_thinking"].includes(block.type)) {
+
           // Foreign private reasoning is retained in the native transcript, and
           // is not replayed as another provider's authenticated reasoning.
         } else if (block.type === "compaction" && typeof block.content === "string") {
@@ -115,7 +121,7 @@ export function toNativeContent(message: AssistantMessage): any[] {
   const blocks: any[] = [];
   for (const block of message.content) {
     if (block.type === "text") blocks.push({ type: "text", text: block.text });
-    else if (block.type === "thinking" && !block.redacted) blocks.push({ type: "thinking", thinking: block.thinking, signature: block.thinkingSignature ?? "local-provider-replay" });
+    else if (block.type === "thinking") blocks.push(block.redacted?{type:"redacted_thinking",data:block.thinkingSignature}:{ type: "thinking", thinking: block.thinking, signature: block.thinkingSignature ?? "local-provider-replay" });
     else if (block.type === "toolCall") {
       if (block.argumentsError) throw new Error("provider returned malformed tool arguments");
       blocks.push({ type: "tool_use", id: block.id, name: block.name, input: block.arguments });

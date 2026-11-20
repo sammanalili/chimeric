@@ -4,9 +4,12 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 
-from release_check import ROOT, ReleaseError, audit, selected_paths
+# Support python3 -I without importing modules from the working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_check import ROOT, ReleaseError, audit, private_markers, selected_paths
 
 
 def export_source(root: Path, destination: Path, markers=None):
@@ -37,10 +40,13 @@ def export_source(root: Path, destination: Path, markers=None):
         copied = audit(staged, markers, strict_tree=True)
         if not copied['sourceChecksPassed']:
             raise ReleaseError('Copied source failed verification: ' + '; '.join(copied['findings']))
+        # Metadata belongs to the copied bytes. A source edit between the
+        # initial audit and copying must not leave a stale version/channel.
+        report = copied
         if any(hashlib.sha256((staged / file['path']).read_bytes()).hexdigest() != file['sha256'] for file in files):
             raise ReleaseError('Staged files changed during verification.')
         (staged / 'SOURCE-MANIFEST.json').write_text(json.dumps({'product': 'Chimeric',
-            'kind': 'integration-source', 'channel': report['releaseChannel'],
+            'kind': 'integration-source', 'version': report['version'], 'channel': report['releaseChannel'],
             'originalRuntimeIncluded': False, 'privateProfileIncluded': False,
             'openReleaseGates': report['openReleaseGates'], 'files': files}, indent=2) + '\n')
         staged.rename(destination)
@@ -48,7 +54,7 @@ def export_source(root: Path, destination: Path, markers=None):
             # Roll back our newly created output; never touch an older export.
             destination.rename(staged)
             raise ReleaseError('Exported files changed during publication.')
-    return {'destination': str(destination), 'files': len(files), 'sourceChecksPassed': True,
+    return {'destination': str(destination), 'files': len(files), 'version': report['version'], 'sourceChecksPassed': True,
             'openReleaseGates': report['openReleaseGates']}
 
 
@@ -59,7 +65,7 @@ if __name__ == '__main__':
     parser.add_argument('--private-markers-file', type=Path)
     args = parser.parse_args()
     try:
-        markers = [value.encode() for value in json.loads(args.private_markers_file.read_text())] if args.private_markers_file else []
+        markers = private_markers(args.private_markers_file)
         print(json.dumps(export_source(args.root, args.out, markers), indent=2))
     except (OSError, ValueError, KeyError) as error:
         print(json.dumps({'sourceChecksPassed': False, 'error': str(error)}))

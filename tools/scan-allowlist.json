@@ -1,0 +1,14 @@
+[
+  {
+    "path": "tests/antigravity-http-provider.test.ts",
+    "rule": "generic-api-key",
+    "lineSha256": "417d577570a8dd16af1b2d24ffe49910e009ede02152bd563b204b13ed7a6ef4",
+    "reason": "Synthetic token fixture used to assert service error messages never expose a caller credential. It cannot authenticate to a service."
+  },
+  {
+    "path": "tools/build-frontend.py",
+    "rule": "generic-api-key",
+    "lineSha256": "f2b38a8d505844d2a2e58ff690979224f9827a0acfcc7f2d735fd542e19361c9",
+    "reason": "SHA-256 checksum of a known frontend input asset, used to reject unsupported upstream bytes. The dictionary key is named credential because the asset contains the credentials screen; the value is an integrity digest, not a credential."
+  }
+]

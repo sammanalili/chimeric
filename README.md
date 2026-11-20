@@ -2,15 +2,34 @@
 
 [日本語版 README](README.ja.md)
 
-Chimeric is a local research workspace that keeps the original research runtime and harness while adding a provider-neutral model layer, a native Chimeric launcher, local credential handling, model discovery, reasoning controls, vision input, a static DNA mark, and an animated atom identity. The public integration source is [sammanalili/chimeric](https://github.com/sammanalili/chimeric).
+Chimeric is a local research workspace that keeps the original research runtime and harness while adding a provider-neutral model layer, a native Chimeric launcher, local credential handling, model discovery, reasoning controls, vision input, a static DNA mark, and an animated atom identity. The canonical public source location is [sammanalili/chimeric](https://github.com/sammanalili/chimeric).
 
 The public source contains the Chimeric integration, build tools, tests, and documentation. The original runtime remains a versioned integration dependency with its original provenance, and recovered runtime binaries, packaged runtime previews, private profiles, API keys, and personal research data are supplied separately.
 
-## Current readiness
+## Version 0.3.0-rc.1 is in preparation
 
-The macOS arm64 development app, AppKit/WKWebView native window, provider bridge, ChatGPT subscription connection, language preference, and live reload paths have been exercised. The current source evidence is 60 Bun tests and 246 assertions across 11 files, plus 15 Python publication tests. Final package verification remains pending.
+The current working version adds a compact usage/price indicator beside the model picker, official-client Claude subscription connections, Fable 5.2 compatibility, shared image choices, optional classifiers and four generic scientific skills. Reported subscription quota is kept separate from locally tracked tokens and estimated API costs. Unknown prices and quota remain unavailable.
 
-The source-boundary and source-license gates have passed on the reviewed export. Verification remains in progress for a fresh-install and restore test, runtime sandbox isolation, managed portable converters, the complete Linux harness and Docker path, Linux arm64 packaging, voice portability, the final brand and locale audit, and redistribution review for the preserved runtime and bundled components. New Chimeric source is selected for Apache License 2.0; that selection does not license upstream material. These gates are recorded in [docs/RELEASE-READINESS.md](docs/RELEASE-READINESS.md). The packaged runtime remains a private technical preview while those gates are open.
+The frozen development source passed 964 Bun tests with 5,982 assertions across 96 files and 61 Python tests. A clean 292-file source export passed 901 Bun tests with 5,254 assertions. Sixty-three tests that require separately supplied native fixtures skipped as expected. The same export completed 61 Python tests with four fixture-dependent skips, and the strict release check passed.
+
+The designated Mac candidate is `work/release-goal-20261120/macos-rc-resource-wired17/Chimeric.app`. It passed the isolated fresh-profile verifier without making a provider request or invoking an official model client. The immediately preceding candidate also preserved a seeded project, nine frames, 21 artifacts and 21 artifact versions across a stop and restart. The final arm64 bundle passes strict code-signature verification with a local ad-hoc signature. It is not notarized.
+
+The final source, Mac app, Mac ZIP, Linux directory and Linux tarball scan found no unresolved Gitleaks matches and no ClamAV detections. Chimeric now rejects Google installed-app OAuth client IDs and client-secret shapes from its public source. This is evidence for those exact bytes, not proof that the app is free of vulnerabilities or malware. Full backup/restore and research-tool round trips, packaged credential isolation, notarization, managed converters, the complete Linux harness, WSL, portable voice dependencies and runtime distribution rights remain open. Class 2 also remains disabled. See [the changelog](CHANGELOG.md), [release evidence](docs/RELEASE-READINESS.md) and [release gates](release-status.json).
+
+## Previous version 0.2.0-rc.1
+
+Highlights for this prerelease:
+
+- Provider-neutral model discovery and effort routing, including Gemini 4 Argon and Gemini 4 Carbon catalog families.
+- ChatGPT subscription discovery and image generation, plus Gemini image generation and OpenAI GPT Image generation.
+- Antigravity support through the official `agy` client route, recommended for routine use. Direct Antigravity HTTP is experimental.
+- Catalog and effort fixes, with exact saved-model routing, plus a memory-classifier request adjustment that preserves its safety gates.
+- Optional [TypeSafe and self-hosted classifier connections](docs/CLASSIFIERS.md), off by default, with synthetic connection checks. Automatic research classification remains separate.
+- Four compact, generic [scientific communication skills](docs/SCIENTIFIC-SKILLS.md) for writing, data visualization, illustration and documents, without private example assets or datasets.
+
+AGY evidence includes a live 1024 × 1024 JPEG, native artifact and receipt checks, and 239 focused tests with 1,460 assertions across 15 files. The catalog-fix evidence includes 118 tests and 806 assertions, with one browser OAuth test skipped.
+
+The source-boundary and source-license gates have passed on the reviewed export. Verification remains in progress for a fresh-install and restore test, runtime sandbox isolation, managed portable converters, native Linux and Docker execution, Linux arm64 packaging, voice portability, the final brand and locale audit, and redistribution review for the preserved runtime and bundled components. New Chimeric source is selected for Apache License 2.0; that selection does not license upstream material. These gates are recorded in [docs/RELEASE-READINESS.md](docs/RELEASE-READINESS.md). This prerelease remains a private technical preview while those gates are open.
 
 ## Platform installation
 
@@ -22,7 +41,7 @@ The source-boundary and source-license gates have passed on the reviewed export.
 
 The source tree expects a compatible Chimeric runtime binary supplied separately. Keep that binary outside the source staging tree.
 
-Required tooling is Bun 1.4.3, Python 3, macOS with Xcode Command Line Tools, and Swift for the native app entry point. Install JavaScript dependencies without running package lifecycle scripts:
+Required tooling is Bun 1.4.3, Python 3, Go for the Antigravity HTTP bridge, macOS with Xcode Command Line Tools, and Swift for the native app entry point. Install JavaScript dependencies without running package lifecycle scripts:
 
 ```sh
 bun install --frozen-lockfile --ignore-scripts
@@ -66,13 +85,19 @@ Reasoning effort is selected per model. Supported levels are provider-specific s
 
 The ChatGPT subscription is a separate connection. Use its own sign-in controls, then disconnect it from the same controls. It uses the fixed ChatGPT backend destination and the Codex Responses transport. It is not edited as an ordinary API provider.
 
+The Antigravity subscription connection discovers text models and image models separately. Its image path supports text-to-image at provider-native 1K resolution and preserves JPEG, PNG, or WebP output MIME and extension. Requested sizes select an aspect ratio; they do not promise exact pixel dimensions. Image editing, reference images, transparency, and quality controls are not exposed in this prerelease. Subscription image requests remain bound to the selected account and do not fall back to an API provider.
+
 ## Files, vision, and local operations
 
 Text and image content are sent to the selected model endpoint. Image input requires a model with verified image capability. Public document URLs are fetched only over HTTP or HTTPS, reject Anthropic destinations and private-network resolutions, follow at most three redirects, and cap downloads at 50 MiB. PDF text and page images use local converters with a 60-second process limit and a 100-page visual-input limit.
 
 The broader managed-converter pipeline is still a release gate. The current source has a PDF path and local speech integration, while Office, OCR, and portable converter provisioning remain incomplete. Voice configuration points to a local Python and Whisper runtime; missing dependencies fail explicitly.
 
+For the complete source test surface, install `pdftotext`, `pdfinfo`, `pdftoppm`, `pdfimages`, `pandoc`, and `tesseract`. Set `CHIMERIC_CONVERTER_PATH` to an OS-delimited list of explicit converter directories when they are not on `PATH`; use `:` on Unix-like systems and `;` on Windows. `CONDA_PREFIX` is supported for tools installed in an active Conda environment. A missing converter is reported as an installation condition.
+
 Conversation data, projects, artifacts, provider configuration, model selection, audit records, and encrypted credentials live in the selected private profile. Backup and restore guidance is in [docs/OPERATIONS.md](docs/OPERATIONS.md). No profile is included in this repository.
+
+The selected profile can be set with `SCIENCE_LOCAL_PROFILE` or `CHIMERIC_DATA_DIR`. Use a disposable profile for source tests and keep credentials, session URLs, and research data outside the source tree.
 
 ## Architecture and security
 
@@ -88,12 +113,14 @@ Install the declared JavaScript dependencies, then run the focused test suite:
 
 ```sh
 bun install --frozen-lockfile --ignore-scripts
-bun test
+bun run test
 ```
 
 Build the runtime with `bun tools/build-runtime.ts SOURCE DESTINATION`. Build scripts are intentionally explicit about the recovered binary and output directory. See [CONTRIBUTING.md](CONTRIBUTING.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-The source release boundary is declared in `release.manifest.json`. Run `python3 tools/release_check.py` for source, credential-pattern, and local-link checks. `tools/prepare-release.py --out DESTINATION` creates an atomic source-only export from the manifest. The reviewed export passed its source checks, while the remaining gates still require runtime evidence and rights review. CI repeats the source checks and Bun test on the pinned development toolchain.
+The source release boundary is declared in `release.manifest.json`. Run `python3 tools/release_check.py` for source, credential-pattern, and local-link checks. `tools/prepare-release.py --out DESTINATION` creates an atomic source-only export from the manifest. The reviewed export passed its source checks, while the remaining gates still require runtime evidence and rights review. `bun run test` runs the isolated unit suite; `bun run test:e2e` is an explicitly enabled live-profile suite and is not a default release check.
+
+The memory classifier keeps the static screening and native write gates, while its model request uses the configured classifier input and bounded options. A classifier timeout, truncation, unavailable model, or unparseable response remains fail-closed.
 
 ## Provenance and licensing
 

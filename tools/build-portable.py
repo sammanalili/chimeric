@@ -1,11 +1,59 @@
 """Export the checked Linux browser runtime without private profile data."""
 from __future__ import annotations
-import argparse, gzip, hashlib, io, json, os, shutil, tarfile, tempfile
+import argparse, gzip, hashlib, io, json, os, re, shutil, subprocess, tarfile, tempfile
 from pathlib import Path
 
 EXPECTED_BINARY_SHA256 = "15261d747064ae49a124d9e416b0c9e2c1d78285a0b2b04534d394d922b12355"
 EXPECTED_SOURCE_SHA256 = "9fd2e4e942385471ce1000b0f63873c57e2dfd5c768dbcb7b0c917fa227673c7"
-REQUIRED_RUNTIME = ("chimeric.js", "local-runtime.js", "chatgpt-credentials.js", "provider-settings.js", "local_asr.py", "sqliteWorkerEntry.js", "orgsImportWorker.js", "sandbox/gitScanWorker.js", "stallWatchdogEntry.js", "asset-manifest.json", "patch-manifest.json")
+REQUIRED_RUNTIME = ("chimeric.js", "local-runtime.js", "chatgpt-credentials.js", "provider-settings.js", "antigravity-settings.js", "image-generation-settings.js", "decision-settings.js", "usage-indicator.js", "voice-settings.js", "class2-settings.js", "provider-events.js", "protected-resource-view.js", "local_asr.py", "sqliteWorkerEntry.js", "orgsImportWorker.js", "sandbox/gitScanWorker.js", "stallWatchdogEntry.js", "asset-manifest.json", "patch-manifest.json")
+BROWSER_MODULES = frozenset({"chatgpt-credentials.js", "provider-settings.js", "antigravity-settings.js", "image-generation-settings.js", "decision-settings.js", "usage-indicator.js", "voice-settings.js", "class2-settings.js", "provider-events.js", "protected-resource-view.js"})
+
+def release_metadata() -> dict:
+    package = json.loads((Path(__file__).resolve().parents[1] / "package.json").read_text())
+    version = package.get("version", "")
+    if not isinstance(version, str) or not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.[1-9]\d*)?", version):
+        raise ValueError("package.json must declare a stable or rc.N semantic version")
+    return {"product": "Chimeric", "version": version, "runtimeVersion": "0.1.71"}
+
+def macos_versions(version: str) -> tuple[str, str]:
+    if "-rc." in version:
+        short, candidate = version.split("-rc.")
+        if not 1 <= int(candidate) <= 255:
+            raise ValueError("macOS release candidate number must be between 1 and 255")
+        return short, short + "fc" + candidate
+    return version, version
+
+def build_antigravity_bridge(destination: Path, *, platform: str) -> dict:
+    targets = {"darwin-arm64": ("darwin", "arm64"), "linux-x64": ("linux", "amd64")}
+    if platform not in targets: raise ValueError(f"unsupported Antigravity transport target: {platform}")
+    source = Path(__file__).resolve().parent / "antigravity-http-bridge/main.go"
+    if not source.is_file() or source.is_symlink(): raise ValueError("Antigravity transport helper source is missing or unsafe")
+    source_sha = _sha256(source)
+    compiler = os.environ.get("CHIMERIC_GO") or shutil.which("go")
+    if not compiler or not Path(compiler).is_file() or not os.access(compiler, os.X_OK):
+        raise ValueError("Go compiler is required to package Antigravity transport; add go to PATH or set CHIMERIC_GO")
+    destination = destination.resolve(); destination.parent.mkdir(parents=True, exist_ok=True)
+    goos, goarch = targets[platform]
+    env = dict(os.environ, CGO_ENABLED="0", GOOS=goos, GOARCH=goarch, GO111MODULE="off",
+               GOTOOLCHAIN="local", GOWORK="off", GOFLAGS="", GOPROXY="off", GOSUMDB="off")
+    with tempfile.TemporaryDirectory(prefix=".agy-http-bridge-", dir=destination.parent) as temporary:
+        compiled = Path(temporary) / "agy-http-bridge"
+        try:
+            version = subprocess.run([compiler, "version"], check=True, capture_output=True, text=True, env=env, timeout=30).stdout.strip()
+            subprocess.run([compiler, "build", "-trimpath", "-buildvcs=false", "-o", str(compiled), str(source)],
+                           check=True, capture_output=True, text=True, env=env, cwd=source.parent, timeout=180)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValueError("Could not build the required Antigravity transport helper") from exc
+        header = compiled.read_bytes()[:20] if compiled.is_file() else b""
+        if goos == "linux":
+            valid = len(header) == 20 and header[:6] == b"\x7fELF\x02\x01" and header[18:20] == b"\x3e\x00"
+        else:
+            valid = len(header) == 20 and header[:8] == b"\xcf\xfa\xed\xfe\x0c\x00\x00\x01"
+        if not valid: raise ValueError(f"Antigravity transport compiler produced an invalid {platform} executable")
+        if _sha256(source) != source_sha: raise ValueError("Antigravity transport source changed during compilation; build again")
+        compiled.chmod(0o755); os.replace(compiled, destination)
+    return {"path": "bin/agy-http-bridge", "platform": platform, "sourceSha256": source_sha,
+            "binarySha256": _sha256(destination), "compiler": version, "cgoEnabled": False}
 
 def _inside(path: Path, root: Path) -> bool:
     try: path.resolve(strict=False).relative_to(root.resolve(strict=False)); return True
@@ -110,16 +158,19 @@ def export_bundle(runtime: Path, binary: Path, out: Path, *, expected_binary_sha
     try:
         (stage / "bin").mkdir(); (stage / "runtime").mkdir()
         shutil.copy2(binary, stage / "bin/chimeric"); (stage / "bin/chimeric").chmod(0o755)
+        transport = build_antigravity_bridge(stage / "bin/agy-http-bridge", platform="linux-x64")
         for name in REQUIRED_RUNTIME:
             target = stage / "runtime" / name; target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(Path(runtime) / name, target)
-            if name.endswith(".js") and name not in {"chimeric.js", "local-runtime.js", "chatgpt-credentials.js", "provider-settings.js"}: target.with_suffix(".ts").symlink_to(target.name)
+            if name.endswith(".js") and name not in {"chimeric.js", "local-runtime.js"} | BROWSER_MODULES: target.with_suffix(".ts").symlink_to(target.name)
         shutil.copy2(archive, stage / "runtime" / archive.name); shutil.copytree(assets, stage / "runtime" / assets.name, symlinks=True)
         tree_sha, raw_archive_sha = _validate_archive_binding(stage / "runtime" / archive.name, stage / "runtime" / assets.name, manifest["sha256"])
         if _sha256(stage / "runtime/chimeric.js") != patches["outputSha256"]: raise ValueError("staged runtime entry changed during export")
         manifest = dict(manifest); manifest.pop("root", None); (stage / "runtime/asset-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         shutil.copy2(source / "tools/launcher.mjs", stage / "launcher.mjs")
+        metadata = release_metadata()
+        (stage / "chimeric-version.json").write_text(json.dumps(metadata, indent=2) + "\n")
         command = stage / "chimeric"; command.write_text('#!/bin/sh\nset -eu\nCHIMERIC_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexport BUN_BE_BUN=1\nexec "$CHIMERIC_ROOT/bin/chimeric" "$CHIMERIC_ROOT/launcher.mjs" "$@"\n'); command.chmod(0o755)
-        record = {"platform": "linux-x64", "nativeSourceSha256": patches["sourceSha256"], "binarySha256": expected_binary_sha256, "backendBundleSha256": _sha256(stage / "runtime/local-runtime.js"), "assetArchiveRawGzipSha256": raw_archive_sha, "assetTreeTarSha256": tree_sha, "moduleVersion": manifest["moduleVersion"], "privateProfileIncluded": False, "executionVerified": False}
+        record = {**metadata, "platform": "linux-x64", "nativeSourceSha256": patches["sourceSha256"], "binarySha256": expected_binary_sha256, "backendBundleSha256": _sha256(stage / "runtime/local-runtime.js"), "assetArchiveRawGzipSha256": raw_archive_sha, "assetTreeTarSha256": tree_sha, "moduleVersion": manifest["moduleVersion"], "antigravityTransport": transport, "privateProfileIncluded": False, "executionVerified": False}
         (stage / "BUNDLE-BUILD.json").write_text(json.dumps(record, indent=2) + "\n"); (stage / "NOTICE.txt").write_text("Chimeric integrates the local research runtime 0.1.71. Original component copyright and license notices remain in the bundled assets. This development export has not completed the portable release audit.\n")
         os.replace(stage, out); return record
     except Exception:

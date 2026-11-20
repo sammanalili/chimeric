@@ -1,8 +1,8 @@
 import { lookup } from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, mkdirSync, existsSync } from "node:fs";
+import { join, dirname, basename, delimiter } from "node:path";
 import { bannedHost } from "./registry";
 
 function privateAddress(ip: string) {
@@ -57,8 +57,6 @@ function validBase64(value: string) {
 }
 
 function validateImage(bytes: Buffer, mediaType: string) {
-  // These are representation guards. Full decode and decompression limits
-  // belong to the managed converter worker, which remains a release gate.
   const png = bytes.length >= 45 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
     && bytes.readUInt32BE(8) === 13 && bytes.subarray(12, 16).toString() === "IHDR"
     && bytes.readUInt32BE(16) > 0 && bytes.readUInt32BE(20) > 0 && bytes.readUInt32BE(bytes.length - 12) === 0
@@ -71,33 +69,124 @@ function validateImage(bytes: Buffer, mediaType: string) {
   if (!valid) throw new Error("image bytes do not match the declared image media type");
 }
 
-function converter(name: string) {
-  const path = Bun.which(name);
+export function converterDirectories(env: NodeJS.ProcessEnv = process.env): string[] {
+  const profile = env.SCIENCE_LOCAL_PROFILE || env.CHIMERIC_DATA_DIR;
+  return [
+    ...(env.CHIMERIC_CONVERTER_PATH?.split(delimiter) || []),
+    ...(profile ? [join(profile, "conda/envs/r/bin")] : []),
+    ...(env.CONDA_PREFIX ? [join(env.CONDA_PREFIX, "bin")] : []),
+    "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
+    ...(env.PATH ? env.PATH.split(delimiter) : []),
+  ].filter(Boolean);
+}
+
+export function findConverter(name: string): string | null {
+  const inPath = Bun.which(name);
+  if (inPath) return inPath;
+  for (const dir of converterDirectories()) {
+    if (!dir) continue;
+    const candidate = join(dir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function converter(name: string): string {
+  const path = findConverter(name);
   if (!path) throw new Error(`required document converter is unavailable: ${name}`);
   return path;
 }
 
-async function processText(argv: string[], signal?: AbortSignal) {
+export async function processText(argv: string[], signal?: AbortSignal, timeoutMs = 60_000): Promise<string> {
   signal?.throwIfAborted();
   const env: Record<string, string> = {};
-  for (const key of ["PATH", "LANG", "LC_ALL", "TMPDIR"]) if (process.env[key]) env[key] = process.env[key]!;
-  const child = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", env });
-  const stop = () => child.kill("SIGKILL"); signal?.addEventListener("abort", stop, { once: true });
+  for (const key of ["PATH", "LANG", "LC_ALL", "TMPDIR"]) {
+    if (process.env[key]) env[key] = process.env[key]!;
+  }
+  const existingPath = env.PATH || "";
+  env.PATH = Array.from(new Set([...existingPath.split(delimiter), ...converterDirectories()])).filter(Boolean).join(delimiter);
+
+  const child = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", env, detached: true });
+  const stop = () => {
+    try {
+      if (child.pid) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      }
+    } catch {}
+    try { child.kill("SIGKILL"); } catch {}
+  };
+  signal?.addEventListener("abort", stop, { once: true });
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; stop(); }, 60_000);
+  const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs);
   try {
     const readBounded = async (stream: ReadableStream<Uint8Array>, label: string) => {
-      const reader = stream.getReader(); const chunks: Uint8Array[] = []; let size = 0;
-      try { for (;;) { const next = await reader.read(); if (next.done) break; size += next.value.byteLength; if (size > MAX_CONVERTER_OUTPUT) { stop(); throw new Error(`document converter ${label} output exceeds 20 MiB`); } chunks.push(next.value); } }
-      finally { reader.releaseLock(); }
+      const reader = stream.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) break;
+          size += next.value.byteLength;
+          if (size > MAX_CONVERTER_OUTPUT) {
+            stop();
+            throw new Error(`document converter ${label} output exceeds 20 MiB`);
+          }
+          chunks.push(next.value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
       return new TextDecoder().decode(Buffer.concat(chunks.map(x => Buffer.from(x))));
     };
-    const [code, text, error] = await Promise.all([child.exited, readBounded(child.stdout, "stdout"), readBounded(child.stderr, "stderr")]);
+    const [code, text, error] = await Promise.all([
+      child.exited,
+      readBounded(child.stdout, "stdout"),
+      readBounded(child.stderr, "stderr")
+    ]);
     if (signal?.aborted) throw signal.reason;
-    if (timedOut) throw new Error("document conversion timed out after 60 seconds");
+    if (timedOut) throw new Error(`document conversion timed out after ${timeoutMs / 1000} seconds`);
     if (code !== 0) throw new Error("document conversion failed: " + error.slice(0, 300));
     return text;
-  } finally { clearTimeout(timer); signal?.removeEventListener("abort", stop); if (child.exitCode === null) { stop(); await child.exited; } }
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+    if (child.exitCode === null) {
+      stop();
+      await child.exited;
+    }
+  }
+}
+
+export async function listPdfImages(file: string, signal?: AbortSignal): Promise<string> {
+  return await processText([converter("pdfimages"), "-list", file], signal);
+}
+
+export async function extractPdfImages(file: string, outputPrefix: string, signal?: AbortSignal): Promise<string[]> {
+  await processText([converter("pdfimages"), "-png", "-p", file, outputPrefix], signal);
+  const dir = dirname(outputPrefix);
+  const base = basename(outputPrefix);
+  return readdirSync(dir).filter(f => f.startsWith(base) && f.endsWith(".png")).map(f => join(dir, f));
+}
+
+async function fallbackDocxReader(file: string, signal?: AbortSignal): Promise<string> {
+  const python = Bun.which("python3") || "/usr/bin/python3";
+  const script = `
+import sys, zipfile, xml.etree.ElementTree as ET
+try:
+    with zipfile.ZipFile(sys.argv[1]) as zf:
+        xml_content = zf.read('word/document.xml')
+        tree = ET.fromstring(xml_content)
+        paragraphs = []
+        for p in tree.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'):
+            texts = [node.text for node in p.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t') if node.text]
+            if texts:
+                paragraphs.append(''.join(texts))
+        print('\\n\\n'.join(paragraphs))
+except Exception as e:
+    sys.exit(1)
+`;
+  return await processText([python, "-c", script, file], signal);
 }
 
 export class ContentReader {
@@ -126,27 +215,119 @@ export class ContentReader {
     if (block?.type === "document") {
       const source = block.source;
       if (source?.type === "text") return [{ type: "text", text: String(source.data ?? "") }];
-      if (source?.media_type && source.media_type !== "application/pdf") throw new Error("unsupported document media type: " + source.media_type);
+      const mediaType = source?.media_type;
+      const SUPPORTED_MEDIA_TYPES = new Set([
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/docx",
+        "text/markdown",
+        "text/x-markdown",
+        "text/html",
+        "application/x-latex",
+        "application/x-tex",
+        "text/x-tex",
+      ]);
+      if (mediaType && !SUPPORTED_MEDIA_TYPES.has(mediaType)) {
+        throw new Error("unsupported document media type: " + mediaType);
+      }
       const bytes = await this.sourceBytes(source, signal);
-      if (bytes.length < 5 || bytes.subarray(0, 5).toString() !== "%PDF-") throw new Error("document bytes do not contain a valid PDF header");
-      const stage = mkdtempSync(join(this.directory, "pdf-"));
+      const stage = mkdtempSync(join(this.directory, "doc-"));
       try {
-        const file = join(stage, "document.pdf"); writeFileSync(file, bytes, { mode: 0o600 });
-        const text = await processText([converter("pdftotext"), "-layout", file, "-"], signal);
-        const result: any[] = [{ type: "text", text: (block.title ? `Document: ${block.title}\n` : "") + text }];
-        if (images) {
-          const info = await processText([converter("pdfinfo"), file], signal);
-          const pages = Number(info.match(/^Pages:\s+(\d+)/m)?.[1] ?? 0);
-          if (!pages || pages > 100) throw new Error("PDF visual input requires a document containing 1–100 pages; select a page range with the native PDF tools");
-          await processText([converter("pdftoppm"), "-scale-to", "1024", "-png", file, join(stage, "page")], signal);
-          for (const path of readdirSync(stage).filter(x => /^page-.*\.png$/.test(x)).sort()) {
-            const pageBytes = readFileSync(join(stage, path)); validateImage(pageBytes, "image/png");
-            result.push({ type: "text", text: "PDF page " + path.match(/(\d+)\.png$/)?.[1] });
-            result.push({ type: "image", mimeType: "image/png", data: pageBytes.toString("base64") });
+        if (mediaType === "application/pdf" || (!mediaType && bytes.subarray(0, 5).toString() === "%PDF-")) {
+          if (bytes.length < 5 || bytes.subarray(0, 5).toString() !== "%PDF-") throw new Error("document bytes do not contain a valid PDF header");
+          const file = join(stage, "document.pdf");
+          writeFileSync(file, bytes, { mode: 0o600 });
+          let text = await processText([converter("pdftotext"), "-layout", file, "-"], signal);
+          // OCR fallback when PDF text extraction yields empty whitespace
+          if (!text.trim()) {
+            const info = await processText([converter("pdfinfo"), file], signal);
+            const pages = Number(info.match(/^Pages:\s+(\d+)/m)?.[1] ?? 0);
+            const tesseract = findConverter("tesseract");
+            const pdftoppm = findConverter("pdftoppm");
+            if (tesseract && pdftoppm) {
+              const ocrPages = Math.min(Math.max(pages, 1), 20);
+              await processText([pdftoppm, "-png", "-r", "150", "-f", "1", "-l", String(ocrPages), file, join(stage, "ocr-page")], signal);
+              const ocrPngs = readdirSync(stage).filter(x => /^ocr-page-.*\.png$/.test(x)).sort();
+              const pageTexts: string[] = [];
+              for (const pngName of ocrPngs) {
+                const pageText = await processText([tesseract, join(stage, pngName), "stdout", "-l", "eng"], signal);
+                if (pageText.trim()) pageTexts.push(pageText.trim());
+              }
+              if (pageTexts.length) {
+                text = "[OCR Extracted Content: Scanned document converted via Tesseract OCR]\n\n" + pageTexts.join("\n\n");
+              } else {
+                text = "[Document: This PDF appears to be a scanned image with no readable text layer.]";
+              }
+            } else {
+              text = "[Document: This PDF appears to be a scanned image with no text layer. Install 'tesseract' for automatic OCR extraction.]";
+            }
+          }
+          const result: any[] = [{ type: "text", text: (block.title ? `Document: ${block.title}\n` : "") + text }];
+          if (images) {
+            const info = await processText([converter("pdfinfo"), file], signal);
+            const pages = Number(info.match(/^Pages:\s+(\d+)/m)?.[1] ?? 0);
+            if (!pages || pages > 100) throw new Error("PDF visual input requires a document containing 1–100 pages; select a page range with the native PDF tools");
+            await processText([converter("pdftoppm"), "-scale-to", "1024", "-png", file, join(stage, "page")], signal);
+            for (const path of readdirSync(stage).filter(x => /^page-.*\.png$/.test(x)).sort()) {
+              const pageBytes = readFileSync(join(stage, path)); validateImage(pageBytes, "image/png");
+              result.push({ type: "text", text: "PDF page " + path.match(/(\d+)\.png$/)?.[1] });
+              result.push({ type: "image", mimeType: "image/png", data: pageBytes.toString("base64") });
+            }
+          }
+          return result;
+        }
+
+        // Pandoc conversion for DOCX, Markdown, HTML, and LaTeX
+        let convertedText = "";
+        const titlePrefix = block.title ? `Document: ${block.title}\n` : "";
+        if (mediaType === "text/markdown" || mediaType === "text/x-markdown") {
+          const pandoc = findConverter("pandoc");
+          if (pandoc) {
+            const file = join(stage, "document.md"); writeFileSync(file, bytes, { mode: 0o600 });
+            convertedText = await processText([pandoc, "-f", "markdown", "-t", "markdown", "--wrap=none", file], signal);
+          } else {
+            convertedText = bytes.toString("utf8");
+          }
+        } else if (mediaType === "text/html") {
+          const pandoc = findConverter("pandoc");
+          if (pandoc) {
+            const file = join(stage, "document.html"); writeFileSync(file, bytes, { mode: 0o600 });
+            convertedText = await processText([pandoc, "-f", "html", "-t", "markdown", "--wrap=none", file], signal);
+          } else {
+            convertedText = bytes.toString("utf8").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          }
+        } else if (mediaType === "application/x-latex" || mediaType === "application/x-tex" || mediaType === "text/x-tex") {
+          const pandoc = findConverter("pandoc");
+          if (pandoc) {
+            const file = join(stage, "document.tex"); writeFileSync(file, bytes, { mode: 0o600 });
+            convertedText = await processText([pandoc, "-f", "latex", "-t", "markdown", "--wrap=none", file], signal);
+          } else {
+            convertedText = bytes.toString("utf8");
+          }
+        } else if (mediaType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || mediaType === "application/docx") {
+          const pandoc = findConverter("pandoc");
+          const file = join(stage, "document.docx"); writeFileSync(file, bytes, { mode: 0o600 });
+          if (pandoc) {
+            try {
+              convertedText = await processText([pandoc, "-f", "docx", "-t", "markdown", "--wrap=none", file], signal);
+            } catch (err: any) {
+              convertedText = await fallbackDocxReader(file, signal);
+            }
+          } else {
+            const soffice = findConverter("soffice") || findConverter("libreoffice");
+            if (soffice) {
+              await processText([soffice, "--headless", "--convert-to", "pdf", file, "--outdir", stage], signal);
+              const pdfFile = join(stage, "document.pdf");
+              convertedText = await processText([converter("pdftotext"), "-layout", pdfFile, "-"], signal);
+            } else {
+              convertedText = await fallbackDocxReader(file, signal);
+            }
           }
         }
-        return result;
-      } finally { rmSync(stage, { recursive: true, force: true }); }
+        return [{ type: "text", text: titlePrefix + convertedText }];
+      } finally {
+        rmSync(stage, { recursive: true, force: true });
+      }
     }
     throw new Error("unsupported native content block: " + String(block?.type));
   }

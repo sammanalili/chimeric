@@ -1,6 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
-import {bannedHost} from './registry';
+import {bannedHost} from './vendor-hosts';
 
 const vendorCrashHost='o1158394.ingest.us.sentry.io';
 const vendorUpdateBucket='/operon-dist-cf94a20e-f71c-413c-bd00-9e12b1fedf59';

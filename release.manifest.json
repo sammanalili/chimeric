@@ -12,14 +12,16 @@
     "bun.lock",
     "providers.example.json",
     "release.manifest.json",
-    "release-status.json"
+    "release-status.json",
+    "Dockerfile"
   ],
   "directories": [
     "src",
     "tests",
     "docs",
     "third-party",
-    ".github"
+    ".github",
+    "resources/skills"
   ],
   "tools": [
     "build-runtime.ts",
@@ -27,8 +29,12 @@
     "native-process.ts",
     "build-frontend.py",
     "brand-frontend.mjs",
+    "product-branding.ts",
+    "brand_product_resources.py",
     "generate-atom.mjs",
     "ui_style.py",
+    "brand_skill_resources.py",
+    "bundled_science_skills.py",
     "update-style.py",
     "build-macos-app.py",
     "build-portable.py",
@@ -37,6 +43,23 @@
     "local_asr.py",
     "native_client.py",
     "release_check.py",
-    "prepare-release.py"
+    "prepare-release.py",
+    "scan-release.py",
+    "scan-allowlist.json",
+    "native-memory.ts",
+    "native-session-context.ts",
+    "native-scope-patches.ts",
+    "native-execution-policy.ts",
+    "native-voice-context.ts",
+    "native-kernel-policy.ts",
+    "native-runtime-services.ts",
+    "native-protected-storage.ts",
+    "native-resource-policy.ts",
+    "native-browser-policy.ts",
+    "tailnet-proxy.mjs",
+    "docker-seccomp.json",
+    "antigravity-http-bridge/main.go",
+    "antigravity-http-bridge/main_test.go",
+    "antigravity-http-bridge/go.mod"
   ]
 }

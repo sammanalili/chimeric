@@ -1,66 +1,98 @@
 {
   "product": "Chimeric",
-  "version": "0.1.0",
-  "channel": "development",
-  "reviewedOn": "2026-10-29",
+  "version": "0.3.0-rc.1",
+  "channel": "prerelease",
+  "reviewedOn": "2026-11-20",
   "releaseGates": [
     {
       "id": "source-checks",
       "status": "passed",
-      "requirement": "Clean source export, documentation links, credential exclusion and regression tests pass on the exported tree.",
+      "requirement": "The clean source boundary, documentation links, credential exclusions and regression tests pass on the exported tree.",
       "evidence": "docs/SOURCE-VERIFICATION.json",
-      "note": "Locked dependencies, 60 Bun tests/246 assertions and 15 Python export tests pass locally. GitHub CI is configured; its first run is pending."
+      "note": "The reviewed 292-file clean-export boundary passed the strict release check, 898 Bun tests with 63 expected fixture skips, and 61 Python tests with four expected fixture skips."
+    },
+    {
+      "id": "artifact-scan",
+      "status": "passed",
+      "requirement": "The exact frozen source, Mac app and ZIP, and Linux x64 directory and tarball pass the configured local secret and malware-signature scans.",
+      "evidence": "work/release-goal-20261120/final-release-scan.json",
+      "note": "Gitleaks reported zero unreviewed and three exact reviewed findings. ClamAV database 28188 reported zero infected files and zero errors. The external record contains exact hashes and counts. This does not prove the absence of malware or vulnerabilities."
     },
     {
       "id": "fresh-profile",
-      "status": "pending",
-      "requirement": "Packaged Mac runtime starts from a fresh profile, performs a real research tool/artifact round trip, stops and restores successfully.",
-      "note": "Native Mac window booted a separate fresh profile. Source-built runtime completed an approved Python/artifact round trip and persisted an explicit use-intent choice across restart. Full backup/restore verification remains pending."
+      "status": "partial",
+      "requirement": "The packaged Mac runtime starts from a fresh profile, survives restart, completes backup and restore, and performs a real research-tool and artifact round trip.",
+      "evidence": "wired16 fresh-profile startup and persistence record",
+      "note": "HTTP 200, one project, nine frames, 21 artifacts and 21 versions passed. The counts survived stop and restart and seed errors were zero. Backup/restore and the real research-tool round trip remain open."
     },
     {
       "id": "packaged-isolation",
       "status": "pending",
-      "requirement": "Packaged research execution cannot read provider encryption keys or authentication credentials.",
-      "note": "Actual Mac sandbox denied opening the fake profile encryption key; zero contents read. The complete credential and packaged boundary matrix remains pending."
+      "requirement": "Packaged research execution cannot read provider encryption keys, refresh tokens or other authentication credentials.",
+      "evidence": "OS-level packaged credential-denial test required"
+    },
+    {
+      "id": "mac-notarization",
+      "status": "pending",
+      "requirement": "The exact Mac distributable is release-signed, notarized and accepted by Gatekeeper.",
+      "evidence": "wired16 passes strict arm64 ad-hoc code-signature verification but is not notarized"
     },
     {
       "id": "portable-files",
       "status": "pending",
-      "requirement": "Managed image/PDF/Office/OCR converters work with bounded, isolated execution and installation failure/retry behavior."
+      "requirement": "Managed image, PDF, Office and OCR converters work with bounded, isolated execution and clear installation failure behavior."
     },
     {
       "id": "linux-docker",
+      "status": "partial",
+      "requirement": "The final Linux and Docker packages execute the research harness with sandbox isolation, approvals, artifacts, persistence and restore.",
+      "evidence": "work/release-goal-20261120/linux-current3-scan.json",
+      "note": "The final Linux x64 package passed focused and portable-package tests plus Gitleaks and ClamAV scans. The unchanged pinned ELF and helper previously ran on Ubuntu 24.04, where AppArmor blocked the namespace before service startup. The rebuilt JavaScript runtime and asset tree have not completed a native Linux research-harness run; no full harness or Docker result is claimed."
+    },
+    {
+      "id": "wsl",
       "status": "pending",
-      "requirement": "Fresh Docker installation executes the preserved research harness with sandbox isolation, approvals, artifacts, persistence and restore."
+      "requirement": "The supported WSL2 installation passes startup, research, artifact, persistence and sandbox checks."
     },
     {
       "id": "architecture-coverage",
       "status": "pending",
-      "requirement": "Every claimed CPU/platform target runs the accepted verification suite; unimplemented targets require explicit scope alignment."
+      "requirement": "Every claimed CPU and operating-system target runs the accepted verification suite."
     },
     {
       "id": "voice-portability",
       "status": "pending",
-      "requirement": "Dictation works with documented portable dependencies rather than a separate private installation."
+      "requirement": "Dictation works with documented portable dependencies rather than a private machine-specific installation."
     },
     {
       "id": "brand-language",
-      "status": "pending",
-      "requirement": "App-owned branding, signed-out and error pages, documentation links, and Japanese UI complete the final audit."
+      "status": "partial",
+      "requirement": "App-owned branding, signed-out and error pages, documentation links and Japanese UI complete one packaged audit.",
+      "note": "Checked branding transformations and focused tests pass. The complete packaged signed-out, error, help-link and Japanese walkthrough is not recorded."
+    },
+    {
+      "id": "protected-research",
+      "status": "disabled",
+      "requirement": "Class 2 activation fails closed until credential paths, durable kernel history and all execution consumers pass together."
     },
     {
       "id": "runtime-distribution",
       "status": "review_required",
-      "requirement": "The distribution identifies upstream component rights and establishes permission for every included runtime component.",
+      "requirement": "The distribution establishes the applicable rights for the preserved runtime and every bundled upstream component.",
       "evidence": "docs/DISTRIBUTION.md",
-      "note": "Unresolved distribution risk; applicable rights and exceptions require assessment. No categorical legal conclusion is claimed."
+      "note": "No categorical legal conclusion is claimed."
     },
     {
       "id": "source-license",
       "status": "passed",
-      "requirement": "The project owner selects a distribution license for the new integration source.",
+      "requirement": "The project owner selects a distribution license for eligible new integration source.",
       "evidence": "LICENSE and package.json",
-      "note": "New Chimeric source is selected for Apache License 2.0. This does not grant rights to the preserved upstream runtime, bundled assets, or upstream excerpts."
+      "note": "Apache License 2.0 does not relicense the preserved runtime, bundled assets or upstream excerpts."
+    },
+    {
+      "id": "final-release-audit",
+      "status": "pending",
+      "requirement": "The frozen source, candidate hashes, notices, private-path exclusions and user-facing claims receive one final review."
     }
   ]
 }

@@ -2,6 +2,8 @@
 
 This preview has a checked Linux x64 export and a signed Linux x64 runtime binary. It is a technical preview for amd64 (`x86_64`) Linux. Linux arm64 has no supplied binary. The complete Linux harness, runtime sandbox isolation, and Docker path remain unverified, so this guide does not present Docker or a privileged-container fallback as a supported install.
 
+The 0.3.0-rc.1 candidate was copied to an Ubuntu 24.04 x86_64 host on 2026-11-20. The package hashes matched its build record, both bundled ELF executables ran, and `chimeric version` reported the expected product and runtime versions. Startup then stopped before listening because that host's AppArmor policy denied bubblewrap an unprivileged user namespace. This proves package integrity and basic Linux execution. It does not prove the research harness, sandbox, persistence, restore, or WSL behavior.
+
 ## Requirements
 
 Install these on the host that will run the workspace:

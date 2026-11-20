@@ -1,19 +1,42 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { stream as completions } from '@earendil-works/pi-ai/api/openai-completions';
-import { stream as responses } from '@earendil-works/pi-ai/api/openai-responses';
-import { stream as codex } from '@earendil-works/pi-ai/api/openai-codex-responses';
+import {dispatchModel} from './model-dispatch';
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript';
 import { Registry } from './registry';
 import { ContentReader } from './content';
 import { ReplayStore, toContext, nativeMessage, nativeUsage, stopReason, toolChoice, toNativeContent } from './protocol';
 import { localServerTool, executeServerTool } from './server-tools';
 import {defaultEffort,modelEfforts} from './model-effort';
+import {FABLE_5_2_ID,anthropicConfigurationError} from './anthropic-compat';
 const replayControls = new WeakMap<object,ReplayStore>();
 export function clearBridgeReplay(server: object) { replayControls.get(server)?.clear(); }
 
-export function startBridge(registry: Registry, token: string, port = 0, serverToolExecutor = executeServerTool) {
+function providerFailure(event: any, api: string): Error {
+  const error = new Error(event.error.errorMessage ?? event.reason);
+  // Keep the upstream status structured. Matching words in an error message
+  // could turn an unrelated transient failure into a permanent one.
+  const status = event.error.httpStatus;
+  if (['antigravity-http','anthropic-messages'].includes(api) && Number.isInteger(status) && status >= 400 && status <= 599) {
+    Object.assign(error, { httpStatus: status });
+  }
+  return error;
+}
+
+function streamErrorType(error: any): string {
+  // The native consumer retries api_error events. Invalid requests, expired
+  // credentials, permission denials and quota responses need user action.
+  const status = error?.httpStatus;
+  if (!Number.isInteger(status) || status < 400 || status >= 500) return 'api_error';
+  // Native rate_limit_error events retry indefinitely. AGY requires an explicit
+  // stop-and-wait on 429, so use the terminal request category and retain the
+  // provider's quota/Retry-After explanation in the message.
+  return ({401:'authentication_error',403:'permission_error',404:'not_found_error'} as Record<number,string>)[status] ?? 'invalid_request_error';
+}
+
+export type BridgeAuthorization={modelId:string;replayNamespace?:string;signal?:AbortSignal;assertCurrent:()=>void|Promise<void>;close:()=>void;executeServerTool?:typeof executeServerTool};
+export type BridgePolicy={authorize:(request:Request,body:any)=>Promise<BridgeAuthorization>};
+export function startBridge(registry: Registry, token: string, port = 0, serverToolExecutor = executeServerTool, policy?:BridgePolicy) {
   const directory = join(registry.profileDir, 'provider'); mkdirSync(directory, { recursive: true, mode: 0o700 });
   const reader = new ContentReader(join(directory, 'documents'));
   const replay = new ReplayStore(join(directory, 'replay.db'));
@@ -24,34 +47,46 @@ export function startBridge(registry: Registry, token: string, port = 0, serverT
       if (supplied.length !== token.length || !timingSafeEqual(Buffer.from(supplied), Buffer.from(token))) return Response.json({ error: { type: 'authentication_error', message: 'Invalid local provider session' } }, { status: 401 });
       const path = new URL(request.url).pathname;
       if (path === '/local/catalog') return Response.json(registry.snapshot());
+      let authorization:BridgeAuthorization|undefined;
       try {
         const body = await request.json() as any;
         if (path === '/local/select') return Response.json(registry.select(body.model ?? registry.state.model, body.effort));
         if (path.endsWith('/messages/count_tokens')) return Response.json({ input_tokens: Math.ceil(Buffer.byteLength(JSON.stringify(body),'utf8') / 3), token_count_source: 'byte-estimate' });
         if (!path.endsWith('/messages')) return Response.json({ error: { type: 'not_found_error', message: 'Unknown local provider route' } }, { status: 404 });
+        authorization=await policy?.authorize(request,body);
+        if(authorization)body.model=authorization.modelId;
+        await authorization?.assertCurrent();
         let model = registry.resolve(body.model);
-        const {sessionScope,...auth}=await registry.requestAuth(model,request.signal);
+        if(authorization?.replayNamespace)model={...model,replayKey:(model.replayKey??model.qualifiedId)+'@native-root:'+authorization.replayNamespace};
+        if(model.api==='anthropic-messages'&&model.id===FABLE_5_2_ID&&(body.thinking?.type==='disabled'||body.thinking?.type==='enabled'||body.output_config?.effort==='off'))throw anthropicConfigurationError('Claude Fable 5.2 requires adaptive thinking and does not support thinking off or manual thinking budgets.');
+        const cancel=new AbortController(),policySignal=AbortSignal.any([request.signal,cancel.signal,...authorization?.signal?[authorization.signal]:[]]);
+        const {sessionScope,...auth}=await registry.requestAuth(model,policySignal);
+        policySignal.throwIfAborted();await authorization?.assertCurrent();
+        const usageBinding=registry.usage?.captureBinding(model.provider);
         if(sessionScope)model={...model,replayKey:model.replayKey+'@'+sessionScope};
         const localTools = new Set<string>();
         const converted = { ...body, tools: (body.tools ?? []).map((t: any) => {
           const local = localServerTool(t); if (local) { localTools.add(t.name); return local; } return t;
         }) };
-        const context = await toContext(converted, model, reader, replay, request.signal);
+        const signal=AbortSignal.any([policySignal,...auth.signal?[auth.signal]:[]]);
+        const context = await toContext(converted, model, reader, replay, signal);
+        signal.throwIfAborted();await authorization?.assertCurrent();
         const id = 'msg_local_' + randomUUID().replaceAll('-', '');
-        const cancel = new AbortController(); const signal = AbortSignal.any([request.signal, cancel.signal]);
         const requestedAt = Date.now();
         audit({ event: 'start', id, requestedModel: body.model, provider: model.provider, model: model.id, api: model.api, tools: context.tools?.map(t => t.name) });
         const run = async (emit: (type: string, data: any) => void) => {
           const blocks: any[] = []; let offset = 0; let final: any; let totalInput = 0, totalOutput = 0;
           emit('message_start', { type: 'message_start', message: { id, type: 'message', role: 'assistant', model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } });
           for (let round = 0; round < 12; round++) {
-            const fn = model.api === 'openai-codex-responses' ? codex : model.api === 'openai-responses' ? responses : completions;
+            signal.throwIfAborted();await authorization?.assertCurrent();
+            const fn = (m:any,c:any,o:any)=>dispatchModel(m,c,o,registry);
             let choice = context.tools?.length ? round === 0 ? toolChoice(body) : 'auto' : undefined;
             if (['openai-responses','openai-codex-responses'].includes(model.api) && typeof choice === 'object') choice = { type: 'function', name: choice.function.name };
             const requestedEffort=body.output_config?.effort;
             const effort = body.thinking?.type === 'disabled' || requestedEffort === 'off' ? undefined : modelEfforts(model).includes(requestedEffort)?requestedEffort:defaultEffort(model);
             const reasoning = model.reasoning && ['minimal','low','medium','high','xhigh','max'].includes(effort) ? {reasoningEffort:effort} : {};
             const events = fn(model as any, normalizeContext(context), { ...auth, transport:'sse', signal, maxTokens: Math.min(body.max_tokens ?? model.maxTokens, model.maxTokens), ...(body.temperature !== undefined && model.api!=='openai-codex-responses' ? { temperature: body.temperature } : {}), ...reasoning, toolChoice: choice as any, maxRetries: 0, timeoutMs: model.requestTimeoutMs,
+              onResponse(response:any){try{registry.usage?.observeHeaders(model,response.headers,usageBinding)}catch{/* Metrics must not interrupt research. */}},
               onPayload(payload:any) {
                 if(model.reasoning && model.api === 'openai-completions' && model.compat?.supportsReasoningEffort !== false && effort) payload.reasoning_effort=effort;
                 audit({event:'provider_settings',id,model:model.id,api:model.api,reasoningEffort:payload.reasoning_effort??payload.reasoning?.effort??null,enableThinking:payload.chat_template_kwargs?.enable_thinking??payload.enable_thinking??payload.thinking?.type??null});
@@ -64,7 +99,7 @@ export function startBridge(registry: Registry, token: string, port = 0, serverT
               const index = offset + event.contentIndex; const b = event.partial.content[event.contentIndex];
               let block: any;
               if (b.type === 'text') block = { type: 'text', text: '' };
-              else if (b.type === 'thinking') block = { type: 'thinking', thinking: '', signature: '' };
+              else if (b.type === 'thinking') block = b.redacted?{type:'redacted_thinking',data:b.thinkingSignature}:{ type: 'thinking', thinking: '', signature: '' };
               else block = { type: localTools.has(b.name) ? 'server_tool_use' : 'tool_use', id: b.id, name: b.name, input: {} };
               opened.set(event.contentIndex, index); emit('content_block_start', { type: 'content_block_start', index, content_block: block }); return index;
             };
@@ -77,12 +112,14 @@ export function startBridge(registry: Registry, token: string, port = 0, serverT
               } else if (event.type.endsWith('_end') && 'contentIndex' in event) {
                 const index = begin(event);
                 if (event.type === 'toolcall_end' && !toolJson.get(event.contentIndex)) emit('content_block_delta',{type:'content_block_delta',index,delta:{type:'input_json_delta',partial_json:JSON.stringify(event.toolCall.arguments)}});
-                if (event.type === 'thinking_end') emit('content_block_delta', { type: 'content_block_delta', index, delta: { type: 'signature_delta', signature: 'local-provider-replay' } });
+                if (event.type === 'thinking_end'&&!event.partial.content[event.contentIndex]?.redacted) emit('content_block_delta', { type: 'content_block_delta', index, delta: { type: 'signature_delta', signature: event.partial.content[event.contentIndex]?.thinkingSignature??'local-provider-replay' } });
                 emit('content_block_stop', { type: 'content_block_stop', index }); closed.add(index);
               } else if (event.type === 'done') final = event.message;
-              else if (event.type === 'error') throw new Error(event.error.errorMessage ?? event.reason);
+              else if (event.type === 'error') throw providerFailure(event, model.api);
             }
+            await authorization?.assertCurrent();
             if (!final) throw new Error('Provider closed without a completed message');
+            try{registry.usage?.record(model,final.usage,id+':'+round,usageBinding)}catch{/* Metrics must not interrupt research. */}
             for (const index of opened.values()) if (!closed.has(index)) emit('content_block_stop', { type: 'content_block_stop', index });
             totalInput += final.usage.input; totalOutput += final.usage.output;
             const native = toNativeContent(final); replay.put(native, model.replayKey??model.qualifiedId, final);
@@ -94,7 +131,7 @@ export function startBridge(registry: Registry, token: string, port = 0, serverT
             context.messages.push(final);
             for (const call of serverCalls) {
               let result: any; let isError = false;
-              try { result = await serverToolExecutor(call.name, call.arguments, registry.config.searchUrl, signal); }
+              try { await authorization?.assertCurrent();result = await (authorization?.executeServerTool??serverToolExecutor)(call.name, call.arguments, registry.config.searchUrl, signal); }
               catch (e) { isError = true; result = { error: registry.safeError(e) }; }
               const text = JSON.stringify(result);
               context.messages.push({ role: 'toolResult', toolCallId: call.id, toolName: call.name, content: [{ type: 'text', text }], isError, timestamp: Date.now() });
@@ -115,17 +152,17 @@ export function startBridge(registry: Registry, token: string, port = 0, serverT
           audit({ event: 'complete', id, provider: model.provider, model: model.id, durationMs: Date.now() - requestedAt, inputTokens: totalInput, outputTokens: totalOutput, toolCalls: blocks.filter(b => b.type.endsWith('tool_use')).map(b => b.name) });
           return message;
         };
-        if (!body.stream) return Response.json(await run(() => {}));
+        if (!body.stream) {try{return Response.json(await run(() => {}))}finally{authorization?.close()}}
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
           start(controller) {
             const emit = (event: string, data: any) => { if (!signal.aborted) controller.enqueue(encoder.encode('event: ' + event + '\ndata: ' + JSON.stringify(data) + '\n\n')); };
             const timer = setInterval(() => emit('ping', { type: 'ping' }), 15_000);
-            run(emit).catch(error => { audit({ event: 'error', id, error: registry.safeError(error) }); emit('error', { type: 'error', error: { type: 'api_error', message: registry.safeError(error) } }); }).finally(() => { clearInterval(timer); try { controller.close(); } catch {} });
+            run(emit).catch(error => { audit({ event: 'error', id, error: registry.safeError(error) }); emit('error', { type: 'error', error: { type: streamErrorType(error), message: registry.safeError(error) } }); }).finally(() => { authorization?.close();clearInterval(timer); try { controller.close(); } catch {} });
           }, cancel() { cancel.abort(new Error('Native client cancelled')); },
         });
         return new Response(stream, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'x-request-id': id } });
-      } catch (error) { return Response.json({ type: 'error', error: { type: 'invalid_request_error', message: registry.safeError(error) } }, { status: 400 }); }
+      } catch (error:any) { authorization?.close();return Response.json({ type: 'error', error: { type: 'invalid_request_error', message: registry.safeError(error) } }, { status: Number.isInteger(error?.status)&&error.status>=400&&error.status<=599?error.status:400 }); }
     },
   });
   replayControls.set(server,replay);

@@ -16,31 +16,66 @@ REQUIRED_ROOT_FILES = frozenset({
     'README.md', 'README.ja.md', 'LICENSE', 'NOTICE.md', 'SECURITY.md',
     'CONTRIBUTING.md', 'CHANGELOG.md', '.gitignore', 'package.json',
     'bun.lock', 'providers.example.json', 'release.manifest.json',
-    'release-status.json',
+    'release-status.json', 'Dockerfile',
 })
-REQUIRED_DIRECTORIES = frozenset({'src', 'tests', 'docs', 'third-party', '.github'})
+REQUIRED_DIRECTORIES = frozenset({'src', 'tests', 'docs', 'third-party', '.github', 'resources/skills'})
+REQUIRED_SKILL_ENTRYPOINTS = frozenset(
+    'resources/skills/' + name + '/SKILL.md' for name in (
+        'scientific-writing', 'scientific-data-visualization',
+        'scientific-illustration', 'scientific-documents'))
 REQUIRED_TOOLS = frozenset({
     'build-runtime.ts', 'native-revisions.ts', 'native-process.ts',
-    'build-frontend.py', 'brand-frontend.mjs', 'generate-atom.mjs',
-    'ui_style.py', 'update-style.py', 'build-macos-app.py',
+    'build-frontend.py', 'brand-frontend.mjs', 'product-branding.ts',
+    'brand_product_resources.py', 'generate-atom.mjs',
+    'ui_style.py', 'brand_skill_resources.py', 'bundled_science_skills.py', 'update-style.py', 'build-macos-app.py',
     'build-portable.py', 'launcher.mjs', 'recover_runtime.py',
     'local_asr.py', 'native_client.py', 'release_check.py',
-    'prepare-release.py',
+    'prepare-release.py', 'scan-release.py', 'scan-allowlist.json', 'native-memory.ts', 'native-session-context.ts', 'native-scope-patches.ts', 'native-execution-policy.ts', 'native-voice-context.ts', 'native-kernel-policy.ts', 'native-runtime-services.ts', 'native-protected-storage.ts', 'native-resource-policy.ts', 'native-browser-policy.ts', 'tailnet-proxy.mjs',
+    'docker-seccomp.json', 'antigravity-http-bridge/main.go',
+    'antigravity-http-bridge/main_test.go', 'antigravity-http-bridge/go.mod',
 })
 PRIVATE_NAMES = {'local-auth', 'provider-config.json', 'model-selection.json',
+                 'chatgpt-models.json',
                  'models.last-good.json', 'ui-preferences.json', 'chimeric.local.json',
-                 'id_ed25519', 'id_rsa', 'requests.jsonl'}
+                 'id_ed25519', 'id_rsa', 'requests.jsonl',
+                 'token.json', 'tokens.json', 'credentials.json', 'auth.json',
+                 'oauth.json', 'session.json', 'sessions.json', 'cookies.txt',
+                 '.npmrc', '.netrc', '.ssh', 'local-profile', 'profiles', 'orgs', 'brain'}
 SECRET_PATTERNS = [
     re.compile(rb'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----'),
     re.compile(rb'\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{24,}\b'),
     re.compile(rb'\bgh[pousr]_[A-Za-z0-9]{30,}\b'),
     re.compile(rb'\bgithub_pat_[A-Za-z0-9_]{40,}\b'),
     re.compile(rb'\bnonce=[a-f0-9]{24,}\b'),
+    re.compile(rb'\bAIza[A-Za-z0-9_-]{35}\b'),
+    re.compile(rb'\bya29\.[A-Za-z0-9_-]{20,}\b'),
+    re.compile(rb'\b1//[A-Za-z0-9_-]{20,}\b'),
+    re.compile(rb'\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\b'),
+    re.compile(rb'\b(?:AKIA|ASIA)[A-Z0-9]{16}\b'),
+    re.compile(rb'\bxox[baprs]-[A-Za-z0-9-]{20,}\b'),
+    re.compile(rb'\bcode=oaistb_ac_[A-Za-z0-9._-]{20,}'),
+    re.compile(rb'\bGOCSPX-[A-Za-z0-9_-]{16,}\b'),
+    re.compile(rb'\b\d{6,}-[a-z0-9]{20,}\.apps\.googleusercontent\.com\b', re.IGNORECASE),
 ]
 
 
 class ReleaseError(ValueError):
     pass
+
+
+def private_markers(path: Path | None) -> list[bytes]:
+    """Validate local comparison input without including its contents in errors."""
+    if path is None:
+        return []
+    values = json.loads(path.read_text())
+    if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values):
+        raise ReleaseError('Private markers must be a JSON array of nonempty strings')
+    return [value.encode() for value in values]
+
+
+def safe_source_path(root: Path, path: Path) -> bool:
+    return (root in path.resolve().parents and
+            not any(part.is_symlink() for part in (path, *path.parents) if part != root and root in part.parents))
 
 
 def selected_paths(root: Path) -> list[Path]:
@@ -54,18 +89,18 @@ def selected_paths(root: Path) -> list[Path]:
         raise ReleaseError('release.manifest.json does not contain the complete reviewed source boundary')
     if len(policy.get('files', [])) != len(actual_files) or len(policy.get('directories', [])) != len(actual_directories) or len(policy.get('tools', [])) != len(actual_tools):
         raise ReleaseError('release.manifest.json contains duplicate source entries')
-    names = [*policy['files'], *('tools/' + name for name in policy['tools'])]
+    names = [*policy['files'], *('tools/' + name for name in policy['tools']), *sorted(REQUIRED_SKILL_ENTRYPOINTS)]
     paths = []
     for name in names:
         path = root / name
-        if path.is_symlink() or root not in path.resolve().parents:
+        if not safe_source_path(root, path):
             raise ReleaseError('Unsafe source path: ' + name)
         if not path.is_file():
             raise ReleaseError('Missing required source file: ' + name)
         paths.append(path)
     for name in policy['directories']:
         directory = root / name
-        if directory.is_symlink() or root not in directory.resolve().parents:
+        if not safe_source_path(root, directory):
             raise ReleaseError('Unsafe source directory: ' + name)
         if not directory.is_dir():
             raise ReleaseError('Missing required source directory: ' + name)
@@ -84,7 +119,7 @@ def inspect_file(path: Path, relative: Path, markers: list[bytes]) -> list[str]:
     """Report paths and finding types only; never echo matched credentials."""
     label = relative.as_posix()
     parts = set(relative.parts)
-    if parts & PRIVATE_NAMES or path.name.startswith('.env') or path.suffix in {'.key', '.pem', '.db', '.sqlite', '.sqlite3', '.gz', '.zip', '.dmg', '.exe'} or path.name.endswith(('.enc.json', '.db-wal', '.db-shm')):
+    if parts & PRIVATE_NAMES or path.name.startswith('.env') or path.suffix in {'.key', '.pem', '.db', '.sqlite', '.sqlite3', '.gz', '.zip', '.dmg', '.exe', '.p12', '.pfx', '.jks', '.keystore', '.kdbx', '.jsonl'} or path.name.endswith(('.enc.json', '.db-wal', '.db-shm')):
         return [label + ': private data or binary distribution file']
     if path.stat().st_size > 2 * 1024 * 1024:
         return [label + ': exceeds source-file size limit']
@@ -136,9 +171,15 @@ def audit(root: Path, markers: list[bytes] | None = None, strict_tree: bool = Fa
             if path.is_symlink() or path.is_file() and path not in paths and path.name != 'SOURCE-MANIFEST.json':
                 findings.append(relative.as_posix() + ': unselected file in publication tree')
     status = json.loads((root / 'release-status.json').read_text())
+    package = json.loads((root / 'package.json').read_text())
+    version = package.get('version')
+    if not isinstance(version, str) or not re.fullmatch(r'(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?', version):
+        findings.append('package.json: a semantic release version is required')
+    elif status.get('version') != version:
+        findings.append('release-status.json: version must match package.json')
     pending = [gate['id'] for gate in status['releaseGates'] if gate['status'] != 'passed']
     return {'sourceChecksPassed': not findings, 'filesChecked': len(paths),
-            'findings': findings, 'releaseChannel': status['channel'], 'openReleaseGates': pending,
+            'findings': findings, 'version': version, 'releaseChannel': status['channel'], 'openReleaseGates': pending,
             'scope': 'Source boundary, known credential patterns, local Markdown links and declared release gates. This does not establish runtime correctness or redistribution rights.'}
 
 
@@ -151,7 +192,7 @@ def main() -> int:
     parser.add_argument('--ship', action='store_true')
     args = parser.parse_args()
     try:
-        markers = [value.encode() for value in json.loads(args.private_markers_file.read_text())] if args.private_markers_file else []
+        markers = private_markers(args.private_markers_file)
         report = audit(args.root, markers, args.strict_tree)
     except (OSError, ValueError, KeyError) as error:
         print(json.dumps({'sourceChecksPassed': False, 'error': str(error)}))

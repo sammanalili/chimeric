@@ -4,7 +4,7 @@
 
 ```sh
 bun install --frozen-lockfile --ignore-scripts
-bun test
+bun run test
 bun tools/build-runtime.ts SOURCE DESTINATION
 python3 tools/recover_runtime.py BINARY DESTINATION
 python3 tools/build-macos-app.py --runtime RUNTIME --binary BINARY --out OUTPUT
@@ -12,6 +12,14 @@ python3 tools/build-portable.py --runtime RUNTIME --binary BINARY --out OUTPUT
 python3 tools/release_check.py
 python3 tools/prepare-release.py --out OUTPUT
 ```
+
+## Local test dependencies
+
+The complete source test surface expects the converter executables `pdftotext`, `pdfinfo`, `pdftoppm`, `pdfimages`, `pandoc`, and `tesseract` to be available. A test environment may set `CHIMERIC_CONVERTER_PATH` to an OS-delimited list of explicit converter directories. Use `:` on Unix-like systems and `;` on Windows. `CONDA_PREFIX` is also recognized when the tools are installed in an active Conda environment. Missing converter dependencies must remain visible as an installation condition; they are not silently replaced.
+
+The selected profile can be supplied with `SCIENCE_LOCAL_PROFILE` or `CHIMERIC_DATA_DIR`. Use a disposable profile for tests and keep credentials, session URLs, and research data outside the source tree.
+
+`bun run test` is the isolated unit suite. `bun run test:e2e` explicitly enables live-profile tests through `CHIMERIC_LIVE_E2E=1`; live E2E is not part of the default source check and must not be reported as run unless its runtime evidence exists.
 
 The packagers require a verified platform-matching binary. Keep `BINARY` outside the source tree. Build output is disposable and must not contain a private profile.
 

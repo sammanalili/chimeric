@@ -8,6 +8,13 @@ const isApp = resources.endsWith('/Contents/Resources');
 const productRoot = isApp ? resolve(resources, '../../..') : resources;
 const defaultPort = 18868;
 
+export function versionInfo(root = resources) {
+  const packaged = join(root, 'chimeric-version.json');
+  const info = JSON.parse(readFileSync(existsSync(packaged) ? packaged : join(root, '../package.json'), 'utf8'));
+  if (typeof info.version !== 'string' || !/^\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$/.test(info.version)) throw new Error('Invalid Chimeric release version.');
+  return {version: info.version, runtimeVersion: '0.1.71'};
+}
+
 export function parseArgs(argv = []) {
   let action;
   let profileArgument;
@@ -82,11 +89,28 @@ function defaultProfileFor(platform = process.platform, env = process.env) {
   if (platform === 'win32') return join(env.LOCALAPPDATA ?? join(homedir(), 'AppData/Local'), 'Chimeric');
   return join(env.XDG_DATA_HOME ?? join(homedir(), '.local/share'), 'chimeric');
 }
+function readMacOSDefaults(platform = process.platform) {
+  if (platform !== 'darwin' || typeof Bun === 'undefined') return {};
+  try {
+    const readKey = (key) => {
+      const res = Bun.spawnSync(['/usr/bin/defaults', 'read', 'org.chimeric.workbench', key], { stdout: 'pipe', stderr: 'ignore' });
+      return res.exitCode === 0 ? new TextDecoder().decode(res.stdout).trim() : '';
+    };
+    const profile = readKey('workspaceProfile');
+    if (!profile.startsWith('/')) return {};
+    const port = Number(readKey('workspacePort'));
+    return {
+      profile,
+      port: Number.isInteger(port) && port >= 1024 && port <= 65534 ? port : undefined,
+    };
+  } catch { return {}; }
+}
 function resolveSettings(parsed) {
   const env = process.env;
   const config = readConfig(join(productRoot, 'chimeric.local.json'), parsed.profileArgument !== undefined && parsed.portArgument !== undefined);
-  const profile = resolve(parsed.profileArgument ?? env.CHIMERIC_DATA_DIR ?? config.profile ?? defaultProfileFor(process.platform, env));
-  const port = Number(parsed.portArgument ?? env.CHIMERIC_PORT ?? config.port ?? defaultPort);
+  const defaults = !parsed.profileArgument && !env.CHIMERIC_DATA_DIR && !config.profile ? readMacOSDefaults() : {};
+  const profile = resolve(parsed.profileArgument ?? env.CHIMERIC_DATA_DIR ?? config.profile ?? defaults.profile ?? defaultProfileFor(process.platform, env));
+  const port = Number(parsed.portArgument ?? env.CHIMERIC_PORT ?? config.port ?? defaults.port ?? defaultPort);
   if (!Number.isInteger(port) || port < 1024 || port > 65534) throw new Error('Choose a port between 1024 and 65534.');
   return { profile, port };
 }
@@ -135,7 +159,7 @@ async function openBrowser(url) {
 async function run(argv = process.argv.slice(2)) {
   const parsed = parseArgs(argv);
   if (parsed.action === 'help') { console.log('Chimeric\n\nUsage: chimeric [open|session|url|serve|daemon|status|stop|help|version] [--profile DIRECTORY] [--port PORT]'); return; }
-  if (parsed.action === 'version') { console.log('Chimeric development build · research runtime 0.1.71'); return; }
+  if (parsed.action === 'version') { const info = versionInfo(); console.log(`Chimeric ${info.version} · research runtime ${info.runtimeVersion}`); return; }
   const { profile, port } = resolveSettings(parsed); const paths = runtimePaths(); const env = childEnvironment(profile);
   if (parsed.action === 'serve' || parsed.action === 'daemon') {
     mkdirSync(profile, { recursive: true, mode: 0o700 }); const log = join(profile, 'chimeric-launcher.log'); appendFileSync(log, '[Chimeric] starting local workspace\n', { mode: 0o600 }); chmodSync(log, 0o600);

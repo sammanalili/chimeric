@@ -1,14 +1,58 @@
-"""Insert the subscription component at a checked native React credentials boundary."""
+"""Mount model and image connections at the checked native React settings boundary."""
 import hashlib
 import gzip
 import io
 import json
+import os
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sys
 import tarfile
 from ui_style import style_resources
+from brand_skill_resources import brand_skill_resource
+from brand_product_resources import brand_product_resource
+from bundled_science_skills import skill_resources
+
+
+def extract_checked_data(bundle, destination):
+    """Use Python's data filter when available, with an equivalent 3.9 fallback."""
+    root = destination.resolve()
+    members = bundle.getmembers()
+    links = {
+        Path(*(part for part in PurePosixPath(member.name).parts if part not in ('', '.')))
+        for member in members if member.issym()
+    }
+    for member in members:
+        raw = member.name
+        if raw in ('.', './'):
+            if not member.isdir():
+                raise RuntimeError('Local asset archive root is not a directory')
+            continue
+        path = PurePosixPath(raw)
+        parts = tuple(part for part in path.parts if part not in ('', '.'))
+        if path.is_absolute() or not parts or '..' in parts or '\\' in raw:
+            raise RuntimeError('Unsafe local asset path: ' + raw)
+        relative = Path(*parts)
+        if relative not in links and any(parent in links for parent in relative.parents):
+            raise RuntimeError('Local asset path traverses an archive link: ' + raw)
+        if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+            raise RuntimeError('Unsupported local asset type: ' + raw)
+        if member.issym():
+            target = (root / relative.parent / member.linkname).resolve()
+            try:
+                target.relative_to(root)
+            except ValueError as error:
+                raise RuntimeError('Local asset symlink escapes the asset root: ' + raw) from error
+        elif member.islnk():
+            target = PurePosixPath(member.linkname)
+            target_parts = tuple(part for part in target.parts if part not in ('', '.'))
+            if target.is_absolute() or not target_parts or '..' in target_parts:
+                raise RuntimeError('Local asset hardlink escapes the asset root: ' + raw)
+    if hasattr(tarfile, 'data_filter'):
+        bundle.extractall(destination, filter='data')
+    else:
+        bundle.extractall(destination)
 
 source, destination = map(Path, sys.argv[1:3])
 credential = './web-dist/assets/index-DXq2yXE0.js'
@@ -18,15 +62,20 @@ hashes = {
     vendor: '4e9a7375874787d81fa02df2ed7353271a4a2f21a241ae191fa3236cab83f1f1',
     './web-dist/assets/index-BgpYmw3d.js': '022cf193684419a4cdfd70e6359af7546373692ee6267ef22d3c6a650b569f05',
     './web-dist/assets/ProjectSettings-DSomlcdW.js': '56aa3f7f4b4ee583ed6105a5256d975d516fb49c52e422f61bb9d0d4e285e0c2',
+    './skills/THIRD_PARTY_LICENSES.md': 'a3a392f1ff3b55e98b3a86c741c67c4aae2719513edef139f831b204d834b41b',
 }
 temporary = destination.with_suffix('.tmp.gz')
 seen = set()
 resources = Path(__file__).resolve().parents[1] / 'src'
 version_hash = hashlib.sha256()
-for path in [Path(__file__), Path(__file__).with_name('brand-frontend.mjs'), Path(__file__).with_name('ui_style.py'),
+science_skills = skill_resources(resources.parent / 'resources' / 'skills')
+for name, data in sorted(science_skills.items()):
+    version_hash.update(name.encode() + b'\0' + data + b'\0')
+for path in [Path(__file__), Path(__file__).with_name('brand-frontend.mjs'), Path(__file__).with_name('native-voice-context.ts'), Path(__file__).with_name('native-browser-policy.ts'), Path(__file__).with_name('ui_style.py'),Path(__file__).with_name('brand_skill_resources.py'),resources/'product-self-knowledge.md',
+             Path(__file__).with_name('brand_product_resources.py'), Path(__file__).with_name('product-branding.ts'),
              *[resources / name for name in ['atom-component.js.fragment', 'chimeric-dna.json', 'chimeric-favicon.svg',
                  'chimeric-icon-192.png', 'chimeric-icon-512.png', 'provider-settings.js', 'chatgpt-credentials.js', 'ja.json', 'chimeric-ui.css',
-                 'chimeric-atom-3d.svg', 'chimeric-atom-3d-static.svg']]]:
+                 'chimeric-atom-3d.svg', 'chimeric-atom-3d-static.svg', 'antigravity-settings.js', 'image-generation-settings.js', 'decision-settings.js', 'voice-settings.js', 'usage-indicator.js', 'class2-settings.js', 'provider-events.js', 'protected-resource-view.js']],resources.parent/'bun.lock']:
     version_hash.update(path.name.encode() + b'\0' + path.read_bytes() + b'\0')
 version = '?chimeric=' + version_hash.hexdigest()[:16]
 own_style_name, own_style, own_images = style_resources(resources)
@@ -38,11 +87,11 @@ changed = set()
 for index, (member, data) in enumerate(entries):
     if data is None:
         continue
+    if member.name in hashes:
+        if hashlib.sha256(data).hexdigest() != hashes[member.name]:
+            raise RuntimeError('Unsupported native asset boundary: ' + member.name)
+        seen.add(member.name)
     if member.name.startswith('./web-dist/') and member.name.endswith(('.js', '.html')):
-        if member.name in hashes:
-            if hashlib.sha256(data).hexdigest() != hashes[member.name]:
-                raise RuntimeError('Unsupported native frontend boundary: ' + member.name)
-            seen.add(member.name)
         text = data.decode()
         if member.name == './web-dist/assets/ProjectSettings-DSomlcdW.js':
             anchor = 'function Vs({onOpenSettings:e,compact:t=!1,compactSize:s="sm"}={}){'
@@ -56,8 +105,8 @@ for index, (member, data) in enumerate(entries):
             anchor = 'children:[s.jsx(se,{sub:"API keys and tokens for services Claude uses on your behalf'
             if text.count(anchor) != 1:
                 raise RuntimeError('Native credentials component anchor changed')
-            text = text.replace(anchor, 'children:[s.jsx(LocalModelConnections,{}),s.jsx(LocalChatGPTCredentials,{}),s.jsx(se,{sub:"API keys and tokens for services Claude uses on your behalf')
-            text = 'import{ModelConnections as LocalModelConnections}from"/api/local/providers/component.js";import{ChatGPTCredentials as LocalChatGPTCredentials}from"/api/local/chatgpt/component.js";' + text
+            text = text.replace(anchor, 'children:[s.jsx(LocalAnthropicCredentials,{}),s.jsx(LocalChatGPTCredentials,{}),s.jsx(LocalAntigravityConnection,{}),s.jsx(LocalModelConnections,{}),s.jsx(LocalImageGenerationSettings,{}),s.jsx(LocalVoiceSettings,{}),s.jsx(LocalDecisionSettings,{}),s.jsx(se,{sub:"API keys and tokens for services Claude uses on your behalf')
+            text = 'import{VoiceSettings as LocalVoiceSettings}from"/api/local/speech/component.js";import{DecisionSettings as LocalDecisionSettings}from"/api/local/classifiers/component.js";import{ImageGenerationSettings as LocalImageGenerationSettings}from"/api/local/image-generation/component.js";import{AntigravityConnection as LocalAntigravityConnection}from"/api/local/antigravity/component.js";import{AnthropicCredentials as LocalAnthropicCredentials,ModelConnections as LocalModelConnections}from"/api/local/providers/component.js";import{ChatGPTCredentials as LocalChatGPTCredentials}from"/api/local/chatgpt/component.js";' + text
         # Version the complete module graph so cached immutable chunks share one
         # React runtime and cannot serve the prior Credentials component.
         text = references.sub(lambda match: match.group(0)[:-1] + version + match.group(1), text)
@@ -73,13 +122,18 @@ brand_files = [{'name': member.name, 'text': data.decode()} for member, data in 
                and not Path(member.name).name.startswith(('vendor-', 'RDKit_minimal-', 'katex-', 'syntaxHighlighterImpl-', 'LottiePlayer.'))]
 runtime = sys.argv[3] if len(sys.argv) > 3 else 'node'
 brand = subprocess.run([runtime, str(Path(__file__).with_name('brand-frontend.mjs'))],
-                       input=json.dumps(brand_files), capture_output=True, text=True, check=True)
+                       input=json.dumps(brand_files), capture_output=True, text=True,
+                       env={**os.environ, 'CHIMERIC_FRONTEND_COMPLETE': '1'})
+if brand.returncode:
+    raise RuntimeError('Native frontend policy patch failed: ' + (brand.stderr.strip() or brand.stdout.strip() or f'exit {brand.returncode}'))
 brand_result = json.loads(brand.stdout)
 brand_updates = {file['name']: file['text'].encode() for file in brand_result['files'] if file['edits']}
 for index, (member, data) in enumerate(entries):
     if data is None:
         continue
     updated = brand_updates.get(member.name, data)
+    updated = brand_skill_resource(member.name,updated)
+    updated = brand_product_resource(member.name, updated)
     if member.name == './web-dist/favicon.svg':
         updated = (resources / 'chimeric-favicon.svg').read_bytes()
     elif member.name in ['./web-dist/icon-192.png', './web-dist/icon-512.png', './web-dist/icon-maskable-512.png']:
@@ -98,12 +152,58 @@ for index, (member, data) in enumerate(entries):
         for asset in ['favicon.svg', 'manifest.webmanifest', 'icon-192.png']:
             updated = updated.replace(('href="./'+asset+'"').encode(), ('href="./'+asset+version+'"').encode())
     elif member.name == './agents/operon/metadata.yaml':
-        updated = data.replace(b'Claude Science', b'Chimeric')
+        updated = updated.replace(b'Claude Science', b'Chimeric')
+    elif member.name == './agents/onboarding/metadata.yaml':
+        updated = updated.replace(b"Hi, let's set Claude up for your science.", b"Hi, let's set Chimeric up for your science.")
+        updated = updated.replace(b"Claude works best", b"Chimeric works best")
+    elif member.name == './skills/THIRD_PARTY_LICENSES.md':
+        # Rebrand the distribution wrapper while preserving the component
+        # attributions and complete license texts below it.
+        updated = data.replace(b'This distribution of Claude Science includes',
+                               b'This distribution of Chimeric includes')
+        old_shell = (b'### Electron / Chromium (macOS window shell)\n\n'
+                     b'The macOS desktop app hosts the app window in a rebranded, unmodified\n'
+                     b'prebuilt Electron. Where the release builds the app flat, Electron is the app\n'
+                     b'itself; otherwise it is a shell nested in the app\n'
+                     b'(`Contents/Helpers/Claude Science Shell.app`). "The Electron bundle" below is\n'
+                     b'whichever of the two holds Electron.')
+        new_shell = (b'### Electron / Chromium (upstream macOS window shell)\n\n'
+                     b'This notice covers Electron/Chromium components from the upstream distribution,\n'
+                     b'including any shell preserved under `Contents/Helpers`. Chimeric\'s native macOS\n'
+                     b'window uses system AppKit and WKWebView. "The Electron bundle" below is any\n'
+                     b'retained upstream Electron bundle.')
+        if updated.count(old_shell) != 1:
+            raise RuntimeError('Native license wrapper boundary changed')
+        updated = updated.replace(old_shell, new_shell)
+        if b'Claude Science' in updated:
+            raise RuntimeError('Unreviewed product branding remains in license notice')
     if updated != data:
         changed.add(member.name)
         member.size = len(updated)
         entries[index] = (member, updated)
 (destination.parent / 'branding-inventory.json').write_text(json.dumps(brand_result['inventory'], indent=2))
+existing_names = {member.name.rstrip('/') for member, _ in entries}
+new_directories = set()
+for name in science_skills:
+    parent = Path(name).parent
+    while parent != Path('.'):
+        directory_name = './' + parent.as_posix()
+        if directory_name not in existing_names:
+            new_directories.add(directory_name)
+        parent = parent.parent
+for name in sorted(new_directories, key=lambda value: (value.count('/'), value)):
+    member = tarfile.TarInfo(name)
+    member.type = tarfile.DIRTYPE
+    member.mode = 0o755
+    entries.append((member, None))
+    existing_names.add(name)
+for name, data in science_skills.items():
+    if name in existing_names:
+        raise RuntimeError('A scientific skill would overwrite an existing bundled resource: ' + name)
+    member = tarfile.TarInfo(name)
+    member.size = len(data)
+    member.mode = 0o644
+    entries.append((member, data))
 for name, data in {own_style_name: own_style, **own_images}.items():
     member = tarfile.TarInfo('./web-dist/assets/' + name)
     member.size = len(data)
@@ -121,7 +221,7 @@ digest = hashlib.sha256(gzip.decompress(destination.read_bytes())).hexdigest()
 assets = destination.parent / ('assets-science-' + digest[:16])
 if not (assets / '.science-assets-sha256').exists():
     with tarfile.open(destination, 'r:gz') as bundle:
-        bundle.extractall(assets, filter='data')
+        extract_checked_data(bundle, assets)
     (assets / '.science-assets-sha256').write_text(digest)
 if (assets / '.science-assets-sha256').read_text() != digest or not (assets / 'drizzle/sqlite/meta/_journal.json').is_file():
     raise RuntimeError('Incomplete local assets tree')

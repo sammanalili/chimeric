@@ -92,6 +92,7 @@ final class WorkspaceWindow: NSWindowController, WKNavigationDelegate, WKUIDeleg
     var arguments: [String]
     var starting = false
     var bootstrapPending = false
+    var authRetries = 0
     var downloads = [ObjectIdentifier: WKDownload]()
     var pinnedArguments: [String] {
         guard let session = session, let port = session.origin.port else { return arguments }
@@ -139,6 +140,7 @@ final class WorkspaceWindow: NSWindowController, WKNavigationDelegate, WKUIDeleg
     @objc func start() {
         guard !starting else { return }
         starting = true
+        bootstrapPending = true
         overlay.isHidden = false
         webView.isHidden = true
         message.stringValue = "Opening your workspace…"
@@ -157,6 +159,7 @@ final class WorkspaceWindow: NSWindowController, WKNavigationDelegate, WKUIDeleg
         }
     }
     func showError(_ text: String) {
+        bootstrapPending = false
         overlay.isHidden = false
         webView.isHidden = true
         message.stringValue = text
@@ -198,20 +201,58 @@ final class WorkspaceWindow: NSWindowController, WKNavigationDelegate, WKUIDeleg
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // Submit only the existing same-origin one-use bootstrap form. The server
         // validates its nonce and sets the normal local cookie/CSRF session.
-        if bootstrapPending && trusted(webView.url) {
-            bootstrapPending = false
-            webView.evaluateJavaScript("""
-            (() => { const f = [...document.forms].find(f => {
-              const u = new URL(f.action, location.href);
-              return u.origin === location.origin && u.pathname === '/api/auth/nonce' && f.method.toLowerCase() === 'post';
-            }); if (f) { f.requestSubmit(); return true; } return false; })()
-            """) { [weak self] value, error in
-                if error != nil { self?.showError("The local session could not open. Please retry.") }
-                else if value as? Bool != true { self?.reveal() }
+        guard trusted(webView.url) else { reveal(); return }
+        webView.evaluateJavaScript("""
+        (() => {
+          const f = [...document.forms].find(f => {
+            const u = new URL(f.action, location.href);
+            return u.origin === location.origin && u.pathname === '/api/auth/nonce' && f.method.toLowerCase() === 'post';
+          });
+          if (f) {
+            if (!f.dataset.submitted) { f.dataset.submitted = '1'; f.requestSubmit(); }
+            return 'submitting';
+          }
+          if (location.pathname === '/api/auth/nonce' || /^Signing in\\b/i.test(document.title)) return 'submitting';
+          if (/^(?:Sign in|Open local workspace|ローカルワークスペースを開く|Login link)\\b/i.test(document.title)) return 'gate';
+          return 'ready';
+        })()
+        """) { [weak self] value, error in
+            guard let self = self else { return }
+            if error != nil {
+                if !self.webView.isLoading { self.showError("The local session could not open. Please retry.") }
+                return
             }
-        } else { reveal() }
+            switch value as? String {
+            case "submitting":
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                    if let self = self, !self.starting, self.bootstrapPending { self.reveal() }
+                }
+            case "gate":
+                if self.authRetries < 2 { self.authRetries += 1; self.start() } else { self.reveal() }
+            default:
+                self.authRetries = 0
+                self.reveal()
+            }
+        }
     }
-    func reveal() { overlay.isHidden = true; webView.isHidden = false; window?.makeFirstResponder(webView) }
+    func ensureAuthenticated() {
+        guard !starting, !bootstrapPending, !webView.isLoading else { return }
+        guard trusted(webView.url), !webView.isHidden else { return }
+        webView.callAsyncJavaScript("""
+        if (/^(?:Sign in|Open local workspace|ローカルワークスペースを開く|Login link)\\b/i.test(document.title)) return false;
+        try {
+          const r = await fetch('/api/auth/status', { headers: { accept: 'application/json' }, cache: 'no-store' });
+          return r.ok;
+        } catch { return false; }
+        """, arguments: [:], in: nil, in: .defaultClient) { [weak self] result in
+            guard let self = self, !self.starting, !self.bootstrapPending, !self.webView.isLoading else { return }
+            if (try? result.get() as? Bool) != true {
+                self.authRetries = 0
+                self.start()
+            }
+        }
+    }
+    func reveal() { bootstrapPending = false; overlay.isHidden = true; webView.isHidden = false; window?.makeFirstResponder(webView) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         if (error as NSError).code != NSURLErrorCancelled { showError("The local workspace is unavailable. Retry to reconnect.") }
     }
@@ -276,8 +317,21 @@ final class ChimericApp: NSObject, NSApplicationDelegate {
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { if let last = windows.last { last.showWindow(nil) } else { newWindow(nil) } }
+        if let target = active ?? windows.last {
+            target.showWindow(nil)
+            if !target.starting && !target.bootstrapPending && (target.webView.isHidden || !target.trusted(target.webView.url)) {
+                target.authRetries = 0
+                target.start()
+            } else {
+                target.ensureAuthenticated()
+            }
+        } else {
+            newWindow(nil)
+        }
         return true
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        active?.ensureAuthenticated()
     }
     @objc func newWindow(_ sender: Any?) {
         let nextArguments = active?.pinnedArguments ?? arguments

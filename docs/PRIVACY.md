@@ -27,8 +27,41 @@ API keys and ChatGPT credentials are stored in the selected profile's private `l
 
 Manual feedback is stored locally. Diagnostic archives are created on request; sharing an archive requires a separate action. Review an export before sharing it because workspace text, file names, provider identifiers, or error details can be present.
 
+## Memory screening
+
+Agent-written persistent memories pass through a static outbound-link screen and a model check before storage. The model check uses the configured medium model connection, so candidate memory text reaches that provider. Its memory-specific prompt permits ordinary research notes, preferences and workflow reminders while screening for high-risk instruction overrides, credential theft and unauthorized actions. Optional reasoning is disabled for this check; models requiring reasoning use their lowest advertised effort, with a bounded output allowance.
+
+A truncated, unreadable or unavailable check still prevents the write. The static link screen, memory scope rules and storage checks remain active. Direct user-authored memories retain their existing static screening. These checks use programmed patterns and model judgments; they do not establish that a memory is safe or authorize actions described in it.
+
 ## Scope and limitations
 
 These guards are not a firewall. They cannot control what a user-configured provider, connector, MCP server, browser, operating system component, or external research service does after receiving a request. Chimeric therefore does not make a categorical no-egress claim. Use a network firewall, restricted account, or isolated host when the research protocol requires an independent egress boundary.
 
 The public integration source is at [sammanalili/chimeric](https://github.com/sammanalili/chimeric). The public source does not include recovered runtime binaries, private profiles, API keys, or personal research data. Packaged runtime redistribution and the complete sandbox verification remain separate release gates; see [RELEASE-READINESS.md](RELEASE-READINESS.md) and [DISTRIBUTION.md](DISTRIBUTION.md).
+
+### Antigravity model requests and image creation
+
+Selecting an Antigravity model sends the session transcript and relevant tool
+schemas through the official Google CLI. Chimeric tool results included on later
+turns also reach that model. The CLI owns its authentication and may retain its
+own records under the active CLI profile. Chimeric's request workspaces are
+removed after completion. External CLI startup customizations cause a refusal by default, because they can
+execute outside Chimeric's tool permissions. Enabling shared MCP servers and
+plugins allows those processes to start with their existing file and network
+permissions. Chimeric does not inspect or change their credentials or policies.
+External hook configuration remains blocked.
+
+Selecting ChatGPT subscription image creation sends the image prompt through
+Chimeric's existing signed-in OpenAI connection and consumes Codex plan usage.
+Its renewable credential is restricted to the exact subscription image endpoint.
+Selecting an API connection uses that connection's separate credential and API
+billing. Chimeric never changes between these billing sources automatically.
+
+The tool saves validated returned bytes locally as native session artifacts. The
+research model receives the result metadata and saved artifact reference. The
+image request does not automatically include the full research transcript. The
+model can derive its image description from that transcript, so review the image
+brief and destination when handling confidential content. A fresh profile keeps
+image creation off until a source is selected. Disconnecting the subscription
+cancels its image requests; changing accounts prevents a stale result from being
+saved into a new request.
