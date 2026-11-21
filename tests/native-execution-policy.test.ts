@@ -6,12 +6,14 @@ import {nativeExecutionPolicyEdits,nativeExecutionPolicyBoundaries} from '../too
 
 // Independent synthetic behaviors exercise the guarded native boundaries.
 const source=`
+const dEn=new Set(['local_table']);
+const nNo=new Set();
 class Kernels {
  async _getOrCreateKernel(frame,environment,cache,Constructor,workspace){if(cache.has(frame))return cache.get(frame);await this._dictLock.acquire();let context=this._frameContext.get(frame),child=new Constructor;await child.start();return child}
 }
 class Runner {
  async _handleRequestNetworkAccess(request){let value=await provider.validateNetworkTarget(request.args.domain);if("alreadyAllowed"in value)return value.alreadyAllowed;return value}
- async _executeToolCallsInner(calls,message){let dispatch=this._flattenedMcpDispatch;for(let call of calls){await this._executeComputeTool(call,message,[])}}
+ async _executeToolCallsInner(calls,message){let dispatch=this._flattenedMcpDispatch;for(let call of calls){let nativeTool=dEn.has(call.name)||nNo.has(call.name);await this._executeComputeTool(call,message,[])}}
  async _executeComputeTool(call,message,files){try{let found=this._flattenedMcpDispatch.get(call.name);if(call.name==="compute_provider")events.push("remote-dispatch");events.push("tool:"+call.name);return found}catch(error){events.push("compute-denied");return {error:error.message}}}
  async invokeTool(agent,name,input,frame,root,project,environments,artifacts,id,signal,classifier,model,bio,pdf,saves,user){try{return await this._executeLocalTool(agent,name,input,frame,root,project)}catch(error){return {error:error.message}}}
 }
@@ -70,6 +72,8 @@ test('Denied flattened connectors become tool errors and do not prevent a permit
  expect(f.events).toEqual(['tool:local_table']);expect(runner.results).toHaveLength(1);
  expect(JSON.parse(runner.results[0][2]).error).toContain('unverified');expect(runner.results[0][3].isError).toBe(true);
  expect(f.received.find(row=>row[2].tool?.name==='external_mcp')[2].flattenedMcp).toBe(true);
+ expect(f.received.find(row=>row[2].tool?.name==='local_table')[2].nativeTool).toBe(true);
+ expect(f.received.find(row=>row[2].tool?.name==='local_table'&&row[2].phase==='compute')[2].nativeTool).toBe(true);
 });
 
 test('Direct compute and registry invocations retain error handling but never reach denied implementations',async()=>{

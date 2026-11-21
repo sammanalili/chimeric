@@ -5,7 +5,7 @@ import {OutboundBrokerError,type OutboundReview} from './outbound-broker';
 
 export type Class2Purpose='model'|'stt';
 export type Class2ModelChoice={qualifiedId:string;name:string;connectionId:string;eligible:boolean;reason?:string};
-export type Class2Review=Pick<OutboundReview,'id'|'digest'|'status'|'createdAt'|'expiresAt'|'rationale'|'privacy'|'destination'|'request'|'disclosures'>;
+export type Class2Review=Pick<OutboundReview,'id'|'digest'|'status'|'createdAt'|'expiresAt'|'connection'|'rationale'|'privacy'|'destination'|'request'|'disclosures'>;
 export type Class2Snapshot={revision:number;frameId:string;rootFrameId:string|null;mode:'standard'|'class2';
  main?:string;reviewer?:string;models:Class2ModelChoice[];ready:boolean;reason?:string;reviews:Class2Review[]};
 export type Class2ConnectionSnapshot={revision:number;connectionId:string;name:string;allowedPurposes:Class2Purpose[];
@@ -44,7 +44,7 @@ function projectSnapshot(value:Class2Snapshot|Class2ConnectionSnapshot,input:{fr
   return {revision:snapshot.revision,frameId:snapshot.frameId,rootFrameId:snapshot.rootFrameId,mode:snapshot.mode,
    main:snapshot.main,reviewer:snapshot.reviewer,ready:snapshot.ready,reason:snapshot.reason,
    models:snapshot.models.map(model=>({qualifiedId:model.qualifiedId,name:model.name,connectionId:model.connectionId,eligible:model.eligible,reason:model.reason})),
-   reviews:snapshot.reviews.map(review=>({id:review.id,digest:review.digest,status:review.status,createdAt:review.createdAt,expiresAt:review.expiresAt,
+   reviews:snapshot.reviews.map(review=>({id:review.id,digest:review.digest,status:review.status,createdAt:review.createdAt,expiresAt:review.expiresAt,connection:review.connection,
     rationale:review.rationale,privacy:review.privacy,destination:review.destination,request:review.request,disclosures:review.disclosures}))};
  }
  const snapshot=value as Class2ConnectionSnapshot;

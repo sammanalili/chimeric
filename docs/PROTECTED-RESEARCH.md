@@ -1,8 +1,8 @@
-Class 2 activation is disabled in the current production wiring. Browser egress and automatic sharing of project uploads between chats still need isolation. The component tests below do not establish complete protected operation.
+Class 2 activation is disabled in the current production wiring. Release validation passed by proving that the feature fails closed, not by approving protected operation. Browser egress, durable native-compute history and every packaged platform still need one complete confinement attestation before a future release can enable it. See [CLASS2-VALIDATION.md](CLASS2-VALIDATION.md).
 
 # Class 2 controls apply to a saved research chat
 
-This page describes the source candidate on 2026-11-20. It does not establish that the installed Mac app has these changes or that every protected research path is ready for release.
+This page describes the source candidate on 2026-11-21. It does not establish that the installed Mac app can process Class 2 data. It cannot in this release.
 
 Class 2 is selected explicitly for each saved chat. Connection permissions belong to the workspace. A provider name, model description, classifier result or model-written instruction cannot grant permission. The optional classifier can remain Off.
 

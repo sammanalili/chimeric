@@ -119,7 +119,7 @@ export function adaptHtml(html, headers, config, kind) {
   return {html, headers: output};
 }
 
-function responseHeaders(headers, config, kind) {
+function responseHeaders(headers, config, kind, requestPath = '') {
   const out = cleanHeaders(headers);
   if (out['set-cookie']) out['set-cookie'] = out['set-cookie'].map(cookie => /;\s*secure(?:;|$)/i.test(cookie) ? cookie : cookie + '; Secure');
   if (typeof out.location === 'string') {
@@ -132,6 +132,16 @@ function responseHeaders(headers, config, kind) {
   // including the native nonce form. Keep same-origin form provenance while
   // withholding the app URL from other sites. The opaque renderer stays private.
   out['referrer-policy'] = kind === 'sandbox' ? 'no-referrer' : 'same-origin';
+  // Tailnet access uses the same authenticated native resource decision. Keep
+  // its response private and non-cacheable without interpreting or widening
+  // the upstream policy result.
+  if (kind === 'app' && requestPath.split('?')[0].startsWith('/api/local/resources/')) {
+    out['cache-control'] = 'no-store, private';
+    out['x-content-type-options'] = 'nosniff';
+    const vary = String(out.vary ?? '').split(',').map(value => value.trim()).filter(Boolean);
+    if (!vary.some(value => value.toLowerCase() === 'cookie')) vary.push('Cookie');
+    out.vary = vary.join(', ');
+  }
   return out;
 }
 
@@ -145,7 +155,7 @@ export async function startProxies(rawConfig) {
       if (!admitted(req, config, kind)) { res.writeHead(403, {'cache-control': 'no-store'}); res.end('Private Chimeric access requires your Tailscale account.'); return; }
       if (kind === 'sandbox' && (!['GET', 'HEAD'].includes(req.method) || req.url.split('?')[0] !== '/mcp_apps')) { res.writeHead(404); res.end('Not found'); return; }
       const pending = http.request({hostname: '127.0.0.1', port: upstream.port, path: req.url, method: req.method, headers: requestHeaders(req, upstream)}, answer => {
-        let headers = responseHeaders(answer.headers, config, kind);
+        let headers = responseHeaders(answer.headers, config, kind, req.url);
         if (req.method !== 'HEAD' && /\btext\/html\b/i.test(String(headers['content-type']))) {
           let length = 0; const chunks = [];
           answer.on('data', chunk => {

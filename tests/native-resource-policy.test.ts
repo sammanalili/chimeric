@@ -17,14 +17,14 @@ function compileMethod(name:string,globals:Record<string,unknown>={},privateFiel
 const previous=(globalThis as any).__scienceLocal,cleanup:Array<()=>void>=[];afterEach(()=>{for(const done of cleanup.splice(0).reverse())done();if(previous===undefined)delete(globalThis as any).__scienceLocal;else(globalThis as any).__scienceLocal=previous});
 function fixture(){const f=artifactFixture();cleanup.push(f.cleanup);return f}
 
-for(const platform of ['darwin','linux'] as const)(fs.existsSync(originals[platform])?test:test.skip)(platform+': 21 checked resource boundaries patch the actual original AST without overlaps',()=>{
- const f=native(platform);expect(f.edits).toHaveLength(21);let result=f.source;for(const e of [...f.edits].sort((a,b)=>b.start-a.start))result=result.slice(0,e.start)+e.text+result.slice(e.end);expect(()=>parse(result,{sourceType:'unambiguous'})).not.toThrow();
- const labels=f.edits.map(e=>e.label);expect(new Set(labels).size).toBe(21);expect(labels).toContain('native-resource-automatic-attachments');expect(labels).toContain('native-resource-upload-request');expect(()=>nativeResourcePolicyEdits(f.ast,f.source+'\n')).toThrow('Unsupported native runtime');
+for(const platform of ['darwin','linux'] as const)(fs.existsSync(originals[platform])?test:test.skip)(platform+': 25 checked resource boundaries patch the actual original AST without overlaps',()=>{
+ const f=native(platform);expect(f.edits).toHaveLength(25);let result=f.source;for(const e of [...f.edits].sort((a,b)=>b.start-a.start))result=result.slice(0,e.start)+e.text+result.slice(e.end);expect(()=>parse(result,{sourceType:'unambiguous'})).not.toThrow();
+ const labels=f.edits.map(e=>e.label);expect(new Set(labels).size).toBe(25);expect(labels).toContain('native-resource-automatic-attachments');for(const label of ['native-resource-upload-request','native-resource-upload-init','native-resource-upload-chunk','native-resource-upload-finalize','native-resource-upload-cancel'])expect(labels).toContain(label);expect(()=>nativeResourcePolicyEdits(f.ast,f.source+'\n')).toThrow('Unsupported native runtime');
 },20000);
 
 darwinNativeTest('actual patched native byte materializer blocks an ordinary sibling before opening classified bytes',async()=>{
  const f=fixture(),v=f.add('classified',{root:'protected'}),store=f.store();await store.recordCreated(await store.captureFrame('protected'),{versionId:v.versionId});let consumer='ordinary',opens=0;
- (globalThis as any).__scienceLocal={resourcePolicy:{materialize:async(_owner:any,operation:any,read:any)=>{const lease=await store.authorize({versionId:operation.args[0].id},consumer,'model-input');return store.materialize(lease,read)}}};
+ (globalThis as any).__scienceLocal={nativeProtectedStoredPath:()=>undefined,resourcePolicy:{materialize:async(_owner:any,operation:any,read:any)=>{const lease=await store.authorize({versionId:operation.args[0].id},consumer,'model-input');return store.materialize(lease,read)}}};
  const reader=compileMethod('_readVersionContent',{storage:f.storage,_b:()=>false,Ui:path,ZR:(value:string)=>value,oy:(root:string,relative:string)=>{opens++;return fs.openSync(path.join(root,relative),'r')},Qs:fs,uLe:{CONTENT_READ_MAX_BYTES:1048576},B_e:createHash,Buffer},true);
  const version={id:v.versionId,storagePath:v.relative,checksum:v.checksum};await expect(reader._readVersionContent(version)).rejects.toThrow('not approved');expect(opens).toBe(0);
  consumer='protected';const result=await reader._readVersionContent(version);expect(result.kind).toBe('ok');expect(result.content).toEqual(v.bytes);expect(opens).toBe(1);
@@ -53,6 +53,13 @@ darwinNativeTest('native upload capture precedes multipart iteration and preserv
  (globalThis as any).__scienceLocal={resourcePolicy:{withUploadRequest:async(_app:any,nativeRequest:any)=>{seenRequest=nativeRequest;throw Error('Actual composer context required')}}};const handler=Function('e','return '+source)(app);
  await expect(handler(request,reply)).rejects.toThrow('Actual composer context');expect(files).toBe(0);expect(seenRequest).toBe(request);
  (globalThis as any).__scienceLocal.resourcePolicy.withUploadRequest=async(_app:any,_request:any,operation:any)=>operation();expect(await handler(request,reply)).toEqual({detail:'No file uploaded'});expect(files).toBe(1);expect(reply.status).toBe(400);
+});
+
+darwinNativeTest('all chunked upload mutations capture the owning composer before body or multipart handling',()=>{
+ const f=native();for(const label of ['native-resource-upload-init','native-resource-upload-chunk','native-resource-upload-finalize','native-resource-upload-cancel']){
+  const edit=f.edits.find(value=>value.label===label)!;expect(edit.text).toContain('.withUploadRequest(');expect(edit.text.indexOf('.withUploadRequest(')).toBeLessThan(edit.text.indexOf('async()=>'));
+  if(label==='native-resource-upload-chunk')expect(edit.text.indexOf('.withUploadRequest(')).toBeLessThan(edit.text.indexOf('.parts()'));
+ }
 });
 
 darwinNativeTest('native conversation visibility accepts only a synchronous explicit true result',()=>{

@@ -48,6 +48,23 @@ class PortableExportTests(unittest.TestCase):
         self.assertEqual(build_portable.macos_versions('0.2.0-rc.1'), ('0.2.0', '0.2.0fc1'))
         self.assertEqual(build_portable.macos_versions('0.2.0'), ('0.2.0', '0.2.0'))
         with self.assertRaises(ValueError): build_portable.macos_versions('0.2.0-rc.256')
+
+    def test_macos_class2_receipt_binds_final_resources_and_linux_cannot_mint_one(self):
+        root = Path(self.tmp.name) / 'receipt-fixture'; resources = root / 'Chimeric.app/Contents/Resources'; runtime = resources / 'runtime'
+        shutil.copytree(self.runtime, runtime); (resources / 'bin').mkdir(parents=True); shutil.copy2(self.binary, resources / 'bin/chimeric')
+        patches = json.loads((runtime / 'patch-manifest.json').read_text())
+        patches.update({'platform': 'darwin-arm64', 'boundaries': list(build_portable.CLASS2_REQUIRED_BOUNDARIES),
+                        'class2RequiredBoundaries': list(build_portable.CLASS2_REQUIRED_BOUNDARIES)})
+        (runtime / 'patch-manifest.json').write_text(json.dumps(patches))
+        receipt_record = build_portable._write_class2_receipt(resources, platform='darwin-arm64', epoch_ms=1700000000123)
+        receipt_path = runtime / 'class2-build-receipt.json'; receipt = json.loads(receipt_path.read_text())
+        self.assertEqual(receipt_record['attestationEpoch'], 1700000000123); self.assertTrue(receipt_record['protectedExecution'])
+        self.assertEqual(receipt_record['sha256'], hashlib.sha256(receipt_path.read_bytes()).hexdigest())
+        self.assertEqual(receipt['files']['runtime/local-runtime.js'], hashlib.sha256((runtime / 'local-runtime.js').read_bytes()).hexdigest())
+        self.assertEqual(receipt['files']['bin/chimeric'], hashlib.sha256((resources / 'bin/chimeric').read_bytes()).hexdigest())
+        self.assertEqual(receipt['requiredBoundaries'], list(build_portable.CLASS2_REQUIRED_BOUNDARIES))
+        with self.assertRaisesRegex(ValueError, 'only for the verified macOS target'):
+            build_portable._write_class2_receipt(resources, platform='linux-x64')
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name); self.runtime = root / "runtime"; self.runtime.mkdir()
@@ -78,6 +95,7 @@ class PortableExportTests(unittest.TestCase):
         with patch.dict(os.environ, {"CHIMERIC_GO": GO}):
             record = build_portable.export_bundle(self.runtime, self.binary, out, expected_binary_sha256=self.expected)
         self.assertFalse(record["executionVerified"]); self.assertEqual(record["assetTreeTarSha256"], json.loads((self.runtime / "asset-manifest.json").read_text())["sha256"])
+        self.assertEqual(record['class2Protection']['supported'], False); self.assertFalse((out / 'runtime/class2-build-receipt.json').exists())
         self.assertEqual(record['version'], json.loads((ROOT / 'package.json').read_text())['version'])
         self.assertEqual(json.loads((out / 'chimeric-version.json').read_text()), build_portable.release_metadata())
         helper = out / "bin/agy-http-bridge"

@@ -38,6 +38,13 @@ test('the adapter never returns research payload and leaves the native database 
 test('a child with nullable legacy root/project fields inherits only through verified parent ancestry',()=>{
  const f=fixture();f.edit('UPDATE frames SET root_frame_id=NULL WHERE id=?','child');expect(lookupFrame(f.profile,'child')).toMatchObject({rootFrameId:'root',projectId:'project-a',ownerId:'owner-a'});
 });
+test('the authoritative root creation time is returned for Class 2 freshness checks',()=>{
+ const f=fixture();f.edit('ALTER TABLE frames ADD COLUMN created_at INTEGER');
+ f.edit('UPDATE frames SET created_at=? WHERE id=?',1700000000123,'root');f.edit('UPDATE frames SET created_at=? WHERE id=?',1700000999999,'child');
+ expect(lookupFrame(f.profile,'root')?.rootCreatedAt).toBe(1700000000123);
+ expect(lookupFrame(f.profile,'child')?.rootCreatedAt).toBe(1700000000123);
+ f.edit('UPDATE frames SET created_at=? WHERE id=?',-1,'root');expect(lookupFrame(f.profile,'root')).toBeUndefined();
+});
 test('missing owners, unavailable projects, and archived projects have no fabricated local fallback',()=>{
  for(const [sql,args] of [
   ['UPDATE projects SET user_id=NULL WHERE id=?',['project-a']],

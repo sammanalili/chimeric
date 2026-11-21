@@ -82,6 +82,7 @@ def export_app(runtime: Path, binary: Path, out: Path) -> dict:
         (resources / 'runtime/asset-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         copy(SOURCE / 'tools/launcher.mjs', resources / 'launcher.mjs')
         (resources / 'chimeric-version.json').write_text(json.dumps(metadata, indent=2) + '\n')
+        class2_receipt = integrity._write_class2_receipt(resources, platform='darwin-arm64')
         with tempfile.TemporaryDirectory(prefix='chimeric-compile-') as tmp:
             compile_stage = Path(tmp); icons = compile_stage / 'Chimeric.iconset'; icons.mkdir()
             for size in [16, 32, 128, 256, 512]:
@@ -116,6 +117,7 @@ def export_app(runtime: Path, binary: Path, out: Path) -> dict:
                   'iconSha256': integrity._sha256(resources / 'Chimeric.icns'),
                   'assetTreeTarSha256': tree_sha, 'assetArchiveRawGzipSha256': archive_sha,
                   'antigravityTransport': transport,
+                  'class2Protection': class2_receipt,
                   'privateProfileIncluded': False, 'developmentBuild': True, 'notarized': False}
         (stage / 'APP-BUILD.json').write_text(json.dumps(record, indent=2) + '\n')
         os.replace(stage, out)

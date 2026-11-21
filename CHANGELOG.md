@@ -1,8 +1,13 @@
 # Changelog
 
-## 0.3.0-rc.1 - Unreleased
+## 0.3.0-rc.2 - Unreleased
 
-Release preparation is in progress. See release-status.json for open verification gates.
+- Continued the Class 2 implementation across protected storage, browser resources, reviewed egress and native execution. This release candidate remains unreleased until the packaged Class 2 workflow passes.
+- Kept the final source-release audit open until Class 2 and its exact packaged evidence are frozen.
+
+## 0.3.0-rc.1 - 2026-11-20
+
+This release candidate prepared the provider-neutral integration source and local platform candidates. See release-status.json for the remaining platform and distribution gates.
 
 - Added official-client Claude subscription integration, separate Anthropic API connections, and Fable 5.2 request compatibility.
 - Added compact subscription usage and API token-price indicators beside the model picker. Provider quota is observed from responses when available; unknown quota and prices remain unavailable.

@@ -2,7 +2,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {existsSync,readFileSync,statSync} from 'node:fs';
 import {join} from 'node:path';
 import {z} from 'zod';
-import {SessionPolicyStore,SessionPolicyError,connectionBindingDigest,normalizeConnectionBinding,policyDigest,writePolicyJson,type ConnectionBinding,type PolicyChange,type SessionContext} from './session-policy';
+import {SessionPolicyStore,SessionPolicyError,normalizeConnectionBinding,policyDigest,writePolicyJson,type ConnectionBinding,type PolicyChange,type SessionContext} from './session-policy';
 
 type Json=null|boolean|number|string|Json[]|{[key:string]:Json};
 export type OutboundPayload={kind:'none'}|{kind:'text';contentType:string;text:string}|{kind:'json';value:Json}|
@@ -127,7 +127,12 @@ export class OutboundBroker {
     if((method==='GET'||method==='DELETE')&&body.bytes.length)throw new OutboundBrokerError('invalid_request','GET and DELETE reviews cannot contain a request body.',400);
     if(body.contentType){if(wireHeaders['content-type']&&wireHeaders['content-type']!==body.contentType)throw new OutboundBrokerError('invalid_headers','Content-Type must match the actual payload.',400);wireHeaders['content-type']=body.contentType}
     const wire={url:target.url,method,headers:wireHeaders,bodyBase64:body.bytes.toString('base64')},key=policyDigest({root:context.rootFrameId,frame:context.frameId,owner:context.ownerId,org:context.organizationId,intentId});
-    const digest=policyDigest({wire,binding:connectionBindingDigest(binding),scope:context,policyRevision:p.revision,rationale,privacy}),prior=this.ledger.find(row=>row.key===key);
+    // Bind the review to the selected connection and current non-secret
+    // configuration. Credential material and its fingerprint stay out of the
+    // human-visible review and digest. assertCurrent still rejects a credential
+    // revision change before approval and immediately before transport.
+    const reviewBinding={id:binding.id,endpoint:binding.endpoint,api:binding.api,revision:binding.revision};
+    const digest=policyDigest({wire,binding:reviewBinding,scope:context,policyRevision:p.revision,rationale,privacy}),prior=this.ledger.find(row=>row.key===key);
     if(prior){const existing=this.entries.get(prior.reviewId);if(prior.digest===digest&&prior.state==='pending'&&existing){this.assertCurrent(existing);return copy(existing.review)}throw new OutboundBrokerError('intent_replayed','This request identifier was already used. An explicit new request needs a new identifier.')}
     if(this.ledger.length>=(this.options.maxLedgerEntries??4096))throw new OutboundBrokerError('receipt_limit','The bounded send-receipt store is full. Protected sends are blocked until its retention is managed.',503);
     for(const entry of this.entries.values())if(['pending','approved'].includes(entry.row.state)&&this.now()>=entry.review.expiresAt)this.transition(entry,'expired');

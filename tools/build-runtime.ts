@@ -17,6 +17,7 @@ import {nativeRuntimeServicesEdits} from './native-runtime-services';
 import {nativeProtectedStorageEdits} from './native-protected-storage';
 import {nativeResourcePolicyEdits} from './native-resource-policy';
 import {brandNativeUserText} from './product-branding';
+import {CLASS2_REQUIRED_BOUNDARIES} from '../src/native-execution-attestation';
 const traverse = (traverse0 as any).default ?? traverse0;
 const generate = (generate0 as any).default ?? generate0;
 const sourceDir = resolve(process.argv[2] ?? '../../work/runtime-recovery/original');
@@ -218,6 +219,7 @@ if(brandConstants!==revision.brandConstants.length)throw new Error('Missing nati
 if(workerHashUpdates!==1)throw new Error('Missing or ambiguous Modal helper integrity boundary');
 if(!seen.has('compute-app-brand'))throw new Error('Missing native compute app naming boundary');
 for (const required of ['PP', 'cIt', 'Ugs', 'ERe', '$G', 'Fma', 'Ahe', 'pJc', 'Oqn', 'AP','hre','BFr','native-message-output','oyt','Yat','d9','qR','local-dictation','local-subscription-routes','local-asset-root','native-daemon-identity','telemetry-hard-opt-out','telemetry-noop-provider','telemetry-no-crash-transport','noncommercial-use-default','native-image-generation-dispatch','native-image-tool-advertisement','native-image-tool-history','native-image-plan-gate','memory-classifier-request','product-log-prefix']) if (!seen.has(required)) throw new Error('missing checked native boundary ' + required);
+for(const required of CLASS2_REQUIRED_BOUNDARIES)if(!seen.has(required))throw new Error('missing Class 2 native boundary '+required);
 let result = original;
 replacements.sort((a,b) => b.start - a.start);
 for (let i = 1; i < replacements.length; i++) if (replacements[i].end > replacements[i-1].start) throw new Error('overlapping native patches');
@@ -249,5 +251,5 @@ for (const file of ['sqliteWorkerEntry.js', 'orgsImportWorker.js', 'sandbox/gitS
 }
 const frontend=Bun.spawnSync(['python3',resolve('tools/build-frontend.py'),join(sourceDir,archive),join(out,archive),process.execPath],{stdout:'pipe',stderr:'pipe'});
 if(frontend.exitCode!==0)throw new Error('Native frontend integration failed: '+frontend.stderr.toString());
-writeFileSync(join(out, 'patch-manifest.json'), JSON.stringify({platform:revision.platform,sourceSha256: createHash('sha256').update(original).digest('hex'), outputSha256: createHash('sha256').update(result).digest('hex'), boundaries: [...seen], patches: [...replacements.map(x => x.label),'product-primary-use','product-mcp-environment'],integrityUpdates:[modalWorker] }, null, 2));
+writeFileSync(join(out, 'patch-manifest.json'), JSON.stringify({platform:revision.platform,sourceSha256: createHash('sha256').update(original).digest('hex'), outputSha256: createHash('sha256').update(result).digest('hex'), boundaries: [...seen], class2RequiredBoundaries:[...CLASS2_REQUIRED_BOUNDARIES], patches: [...replacements.map(x => x.label),'product-primary-use','product-mcp-environment'],integrityUpdates:[modalWorker] }, null, 2));
 console.log(JSON.stringify({ out, boundaries: [...seen], patches: replacements.length }));

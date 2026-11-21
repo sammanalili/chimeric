@@ -84,7 +84,7 @@ test('Unverified lanes and read-only policy changes fail closed',async()=>{
  const f=fixture(false),scope=await f.store.contextForFrame('root'),reviewer=await f.store.contextForFrame('reviewer');f.approve();
  f.store.setMode(scope,{expectedRevision:0,mode:'class2',main:{connection:f.connection,modelId:'model'}});
  expect(()=>f.store.chooseModel(scope,'main','unapproved')).toThrow('not been verified');
- for(const lane of ['brokered-http','local-compute','mcp','remote-compute','uncontrolled-network'] as const)expect(()=>f.store.assertLane(scope,lane)).toThrow();
+ for(const lane of ['brokered-http','local-compute','local-files','mcp','remote-compute','uncontrolled-network'] as const)expect(()=>f.store.assertLane(scope,lane)).toThrow();
  expect(()=>f.store.setMode(reviewer,{expectedRevision:1,mode:'standard'})).toThrow('cannot change');
  expect(()=>f.store.policy({...scope})).toThrow('verified native');
 });

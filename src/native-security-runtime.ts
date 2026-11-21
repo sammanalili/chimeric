@@ -8,15 +8,23 @@ import {ResourcePolicyStore,type ResourceContext} from './resource-policy';
 import {NativeResourceService} from './native-resource-service';
 import {ResourceViews,type ResourceViewReader} from './resource-views';
 import {NativeResourceReader} from './native-resource-reader';
+import {CLASS2_OFFLINE_OVERRIDES,type NativeBuildEvidence} from './native-execution-attestation';
 import type {ConfidentialityManager} from './confidentiality-manager';
 import type {SessionContext} from './session-policy';
 import type {NativeKernelScope} from '../tools/native-kernel-policy';
 
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-/** Installs the daemon half of the checked native hooks. This class does not
- * make Class 2 available. In particular, it deliberately supplies neither a
- * historical-compute attestation nor a protected-kernel allowlist. */
+type ExecutionAttestation={
+ evidence:()=>NativeBuildEvidence;
+ assertNoUnconfinedHistory:(scope:NativeKernelScope,rootCreatedAt:number|undefined)=>void;
+ noteExecution:(kind:string,scope:NativeKernelScope,rootCreatedAt:number|undefined,overrides?:Readonly<Record<string,unknown>>)=>void;
+ allowProtectedKernel:(scope:NativeKernelScope,environment:string,Constructor:unknown,overrides?:Readonly<Record<string,unknown>>)=>boolean;
+};
+
+/** Installs the daemon half of the checked native hooks. Protected compute is
+ * enabled only when a sealed package attestation is supplied. Source builds
+ * and unverified packages keep the same fail-closed behavior. */
 export class NativeSecurityRuntime {
  readonly kernels:NativeKernelEnforcement;
  readonly storage:ProtectedStorage;
@@ -34,12 +42,17 @@ export class NativeSecurityRuntime {
   lookupArtifact?:typeof lookupNativeArtifact;
   readResource?:ResourceViewReader;
   onResourcePolicyChange?:(revision:number)=>void;
+  executionAttestation?:ExecutionAttestation;
  }){
   this.kernels=new NativeKernelEnforcement({
    resolveScope:frameId=>this.scopeForFrame(frameId),
    assertScope:scope=>this.assertScope(scope),
-   // No assertNoUnconfinedHistory and no allowProtectedKernel. A future
-   // release must provide real durable evidence before either is added.
+   assertNoUnconfinedHistory:options.executionAttestation
+    ?scope=>options.executionAttestation!.assertNoUnconfinedHistory(scope,this.rootCreatedAt(scope.frameId))
+    :undefined,
+   allowProtectedKernel:options.executionAttestation
+    ?(scope,environment,Constructor)=>{this.assertProtectedHistory(scope);return options.executionAttestation!.allowProtectedKernel(scope,environment,Constructor,CLASS2_OFFLINE_OVERRIDES)}
+    :undefined,
   });
   this.storage=new ProtectedStorage(options.profileDir,{
    authDir:options.authDir,
@@ -60,6 +73,8 @@ export class NativeSecurityRuntime {
    currentFrame:()=>options.confidentiality.scope.currentFrame(),
    protectionEnabled,
    ownerUserId:options.owner.userId,
+   withProtectedWrite:(frameId,kind,operation)=>this.storage.withResourceWrite(frameId,kind,operation),
+   withProtectedRead:(resource,evidence,operation)=>Promise.resolve(this.storage.withResourceRead(resource,evidence.storageRootFrameIds,operation)),
   });
   const reader=new NativeResourceReader(options.profileDir,{
    protectedRoot:this.storage.reserve,
@@ -77,6 +92,12 @@ export class NativeSecurityRuntime {
   if(!value||value.ownerId!==this.options.owner.userId||value.organizationId!==this.options.owner.organizationId)throw new Error('The native research scope could not be verified.');
   return value;
  }
+ private rootCreatedAt(frameId:string){return this.identity(frameId).rootCreatedAt}
+ private assertProtectedHistory(scope:NativeKernelScope){
+  if(scope.mode!=='class2')return;
+  if(!this.options.executionAttestation)throw new Error('Protected execution evidence is unavailable.');
+  this.options.executionAttestation.assertNoUnconfinedHistory(scope,this.rootCreatedAt(scope.frameId));
+ }
  scopeForFrame(frameId:string):NativeKernelScope{
   const frame=this.identity(frameId),rootFrameId=frame.rootFrameId??frame.frameId,state=this.options.confidentiality.policy.snapshot();
   const policy=state.sessions.find(session=>session.rootFrameId===rootFrameId);
@@ -91,7 +112,7 @@ export class NativeSecurityRuntime {
   return scope;
  }
  private protectedScope(frameId:string):ProtectedStorageScope|undefined{
-  try{const scope=this.scopeForFrame(frameId);return scope.mode==='class2'?scope:undefined}
+  try{const scope=this.scopeForFrame(frameId);if(scope.mode!=='class2')return undefined;this.assertProtectedHistory(scope);return scope}
   catch(error){if(this.options.confidentiality.policy.snapshot().sessions.some(session=>session.mode==='class2'))throw error;return undefined}
  }
  private assertScope(scope:NativeKernelScope|ProtectedStorageScope){
@@ -103,9 +124,13 @@ export class NativeSecurityRuntime {
   return Object.freeze({...context,mode:policy.mode,revision:policy.revision});
  }
  async transition(context:SessionContext,target:'standard'|'class2',apply:()=>void|Promise<void>){await this.kernels.transition(this.scopeForContext(context),target,apply);if(target==='class2')await this.resources.captureFrame(context.frameId)}
- noteExecution(kind:string,context:SessionContext){this.kernels.noteNativeExecution(kind,this.scopeForContext(context))}
+ noteExecution(kind:string,context:SessionContext){
+  const scope=this.scopeForContext(context);
+  this.options.executionAttestation?.noteExecution(kind,scope,this.rootCreatedAt(context.frameId),scope.mode==='class2'?CLASS2_OFFLINE_OVERRIDES:undefined);
+  this.kernels.noteNativeExecution(kind,scope);
+ }
  assertHostContext(owner:unknown){this.kernels.kernels.assertHostContext(owner)}
- beginModel(context:SessionContext){return this.kernels.beginModel(this.scopeForContext(context))}
+ beginModel(context:SessionContext){const scope=this.scopeForContext(context);this.assertProtectedHistory(scope);return this.kernels.beginModel(scope)}
  callbacks(){return {...this.kernels.callbacks(),...this.storage.callbacks(),resourcePolicy:this.resourceService.callbacks()}}
  close(){if(this.closed)return;this.resourceService.close();this.resources.close();this.kernels.close();this.closed=true}
 }

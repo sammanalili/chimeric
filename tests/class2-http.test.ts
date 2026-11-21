@@ -57,7 +57,7 @@ test('actual policy approval and protected main/reviewer routing require current
 });
 test('exact server-held review sends once; payload replacement, cross-session approval and stale digest never dispatch',async()=>{
  const f=await fixture();await f.enable();const review=await f.prepare(),path=base+'/reviews/:id/send',params={id:review.id};
- const visible=await f.call('GET',base);expect(visible.body.reviews[0].request.payload).toEqual({kind:'json',value:{query:'Synthetic public context'}});expect(visible.body.reviews[0].scope).toBeUndefined();expect(visible.body.reviews[0].connection).toBeUndefined();
+ const visible=await f.call('GET',base);expect(visible.body.reviews[0].request.payload).toEqual({kind:'json',value:{query:'Synthetic public context'}});expect(visible.body.reviews[0].scope).toBeUndefined();expect(visible.body.reviews[0].connection).toEqual({id:'external',api:'openai-completions',endpoint:'https://external.example/api'});expect(visible.body.reviews[0].connection.credentialRevision).toBeUndefined();
  expect((await f.call('POST',path,{params,body:{frameId:'frame',digest:review.digest,payload:{query:'MUTATION'}}})).status).toBe(400);
  expect((await f.call('POST',path,{params,body:{frameId:'other',digest:review.digest}})).status).not.toBe(200);
  expect((await f.call('POST',path,{params,body:{frameId:'frame',digest:'0'.repeat(64)}})).status).toBe(409);expect(f.wires).toHaveLength(0);

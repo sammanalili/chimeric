@@ -1,7 +1,8 @@
 import {createHash,randomUUID} from 'node:crypto';
-import {closeSync,constants,fstatSync,fsyncSync,lstatSync,mkdirSync,openSync,readFileSync,realpathSync,renameSync,unlinkSync,writeFileSync} from 'node:fs';
+import {closeSync,constants,fstatSync,fsyncSync,lstatSync,mkdirSync,openSync,readFileSync,realpathSync,renameSync,rmdirSync,unlinkSync,writeFileSync} from 'node:fs';
 import {basename,dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
 import {homedir,tmpdir} from 'node:os';
+import {AsyncLocalStorage} from 'node:async_hooks';
 
 export type ProtectedStorageScope=Readonly<{frameId:string;rootFrameId:string;projectId:string;ownerId:string;organizationId:string;revision:number;executionBinding:string;mode:'class2'}>;
 export type ProtectedStorageCategory='artifacts'|'uploads'|'derived'|'thumbnails'|'toolResults'|'converterJobs'|'imageJobs'|'broker'|'workspace'|'temp';
@@ -12,15 +13,22 @@ const under=(base:string,path:string)=>path===base||path.startsWith(base+sep);
 const identity=(stat:any)=>`${stat.dev}:${stat.ino}`;
 function canonical(path:string){let current=resolve(path);const missing:string[]=[];for(;;){try{return join(realpathSync(current),...missing)}catch(error:any){if(!['ENOENT','ENOTDIR'].includes(error?.code)||dirname(current)===current)throw new ProtectedStorageError('A native storage path could not be resolved.');missing.unshift(basename(current));current=dirname(current)}}}
 const segment=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)&&value!=='.'&&value!=='..';
+const nativeId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/.test(value);
 const categories=new Set(['artifacts','uploads','derived','thumbnails','toolResults','converterJobs','imageJobs','broker','workspace','temp']);
 const filename=(value:unknown):value is string=>typeof value==='string'&&value.length>0&&Buffer.byteLength(value)<=180&&!/[/\\\x00-\x1f\x7f]/.test(value)&&value!=='.'&&value!=='..';
 type Plan={scope:ProtectedStorageScope;layout:ProtectedStorageLayout;config:any;readExceptions:string[]};
+type ResourceWriteKind='artifact'|'upload';
+type ResourceWriteScope={scope:ProtectedStorageScope;layout:ProtectedStorageLayout;category:'artifacts'|'uploads';planned:Set<string>};
+type ResourceReadScope=Readonly<{artifactId:string;versionId:string;projectId:string;ownerId:string;organizationId:string;isUserUpload:boolean;rootFrameIds:readonly string[]}>;
+export type ProtectedResourcePath=Readonly<{absolutePath:string;storagePath:string;basePath:string;relativePath:string}>;
 /** No credentials or research are migrated automatically. The native ops-stage
  * deny already applies to standard workers, including workers started before a
  * future protected file exists. The non-operon namespace is outside its GC regex. */
 export class ProtectedStorage {
  readonly dataDir:string;readonly reserve:string;readonly hostAuth:string;
  private marker=Symbol('daemon-protected-storage');private plans=new WeakSet<object>();private directories=new Map<string,string>();
+ private resourceWrites=new AsyncLocalStorage<ResourceWriteScope>();
+ private resourceReads=new AsyncLocalStorage<ResourceReadScope>();
  constructor(dataDir:string,private options:{scopeForFrame:(frameId:string)=>ProtectedStorageScope|undefined;assertCurrent:(scope:ProtectedStorageScope)=>void;safeReadRoots?:readonly string[];authDir?:string}){
   if(!isAbsolute(dataDir))throw new ProtectedStorageError('Private storage requires an absolute data directory.',400);
   const info=lstatSync(dataDir);if(!info.isDirectory()||info.isSymbolicLink())throw new ProtectedStorageError('Private storage requires a real data directory.');
@@ -45,6 +53,7 @@ export class ProtectedStorage {
   return path;
  }
  private assertFile(path:string){const stat=lstatSync(path);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||process.geteuid&&stat.uid!==process.geteuid())throw new ProtectedStorageError('Linked or non-regular private files cannot be used.');return stat}
+ private readStable(path:string,maxBytes:number){const before=this.assertFile(path);if(before.size>maxBytes)throw new ProtectedStorageError('A private identity file is too large.');const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const opened=fstatSync(fd);if(identity(opened)!==identity(before)||opened.nlink!==1||!opened.isFile()||opened.size>maxBytes)throw new ProtectedStorageError('A private identity file changed while it was opened.');const bytes=readFileSync(fd),after=this.assertFile(path);if(bytes.length!==opened.size||identity(after)!==identity(opened)||after.size!==opened.size||after.mtimeMs!==opened.mtimeMs)throw new ProtectedStorageError('A private identity file changed while it was read.');return bytes}finally{closeSync(fd)}}
  layout(scope:ProtectedStorageScope):ProtectedStorageLayout{
   this.assertScope(scope);const key=digest(JSON.stringify([scope.organizationId,scope.ownerId,scope.projectId,scope.rootFrameId])).slice(0,32),root=join(this.reserve,'roots',key),workspaceBase=join(root,'workspaces');
   const layout=Object.freeze({reserve:this.reserve,hostAuth:this.hostAuth,root,workspaceBase,workspace:join(workspaceBase,scope.frameId),temp:join(root,'tmp',scope.frameId),artifacts:join(root,'artifacts'),uploads:join(root,'uploads'),derived:join(root,'derived'),thumbnails:join(root,'thumbnails'),toolResults:join(root,'results',scope.frameId),converterJobs:join(root,'converters'),imageJobs:join(root,'images'),broker:join(root,'broker')});
@@ -68,6 +77,52 @@ export class ProtectedStorage {
   if(!filename(name))throw new ProtectedStorageError('Invalid private filename.',400);const layout=this.layout(scope),directory=layout[category];if(!categories.has(category)||typeof directory!=='string'||!under(layout.root,directory))throw new ProtectedStorageError('Invalid private storage category.',400);
   this.ensureDirectory(directory);const path=join(directory,name),before=this.assertFile(path),fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);
   try{const opened=fstatSync(fd);if(identity(opened)!==identity(before)||opened.nlink!==1||!opened.isFile())throw new ProtectedStorageError('The private file changed while being opened.');const bytes=readFileSync(fd);this.ensureDirectory(directory);const after=this.assertFile(path);if(identity(after)!==identity(opened)||after.size!==opened.size||after.mtimeMs!==opened.mtimeMs)throw new ProtectedStorageError('The private file changed while being read.');this.assertScope(scope);return bytes}finally{closeSync(fd)}
+ }
+ /** Run the native store commit and its policy classification as one protected
+  * staging operation. The native store must request a plan before opening a
+  * file. Any error, including classification failure, removes every staged
+  * byte before the error escapes. Ordinary saves do not enter this scope. */
+ async withResourceWrite<T>(frameId:string,kind:ResourceWriteKind,operation:()=>Promise<T>):Promise<T>{
+  const scope=this.options.scopeForFrame(frameId);if(!scope)return await operation();this.assertScope(scope);
+  if(this.resourceWrites.getStore())throw new ProtectedStorageError('Nested protected resource writes are not permitted.');
+  const layout=this.layout(scope),transaction:ResourceWriteScope={scope,layout,category:kind==='upload'?'uploads':'artifacts',planned:new Set};
+  try{
+   const value=await this.resourceWrites.run(transaction,operation);
+   if(transaction.planned.size===0)throw new ProtectedStorageError('The native resource store did not request a protected write path.',503);
+   for(const path of transaction.planned){const stat=this.assertFile(path);if((stat.mode&0o077)!==0)throw new ProtectedStorageError('A protected resource file has broad permissions.');}
+   this.assertScope(scope);return value;
+  }catch(error){for(const path of transaction.planned){try{if(under(layout.root,canonical(path)))unlinkSync(path)}catch{}for(let directory=dirname(path);under(layout[transaction.category],directory)&&directory!==layout[transaction.category];directory=dirname(directory))try{rmdirSync(directory)}catch{break}}throw error}
+ }
+ /** Mint the only path a native protected resource write may use. The native
+  * artifact and version IDs select the directory; the user filename never
+  * becomes a host path component. */
+ resourceWritePath(input:{kind:ResourceWriteKind;projectId:unknown;artifactId:unknown;versionId:unknown;filename:unknown}):ProtectedResourcePath|undefined{
+  const transaction=this.resourceWrites.getStore();if(!transaction)return;
+  if(input.kind!==(transaction.category==='uploads'?'upload':'artifact'))throw new ProtectedStorageError('The protected resource producer changed during its write.');
+  if(!segment(input.artifactId)||!segment(input.versionId)||input.projectId!==transaction.scope.projectId||typeof input.filename!=='string')throw new ProtectedStorageError('The native resource identity is invalid.',400);
+  const basePath=transaction.layout[transaction.category],directory=join(basePath,input.artifactId,input.versionId);this.ensureDirectory(directory);
+  const absolutePath=join(directory,'content');if(transaction.planned.has(absolutePath))throw new ProtectedStorageError('A protected resource path was requested twice.');
+  try{this.assertFile(absolutePath);throw new ProtectedStorageError('A protected resource version already exists.',409)}catch(error:any){if(error instanceof ProtectedStorageError)throw error;if(error?.code!=='ENOENT')throw error}
+  transaction.planned.add(absolutePath);return Object.freeze({absolutePath,storagePath:absolutePath,basePath,relativePath:relative(basePath,absolutePath)});
+ }
+ withResourceRead<T>(resource:{artifactId:string;versionId:string;projectId:string;ownerId:string;organizationId:string;isUserUpload:boolean},rootFrameIds:readonly string[],operation:()=>T):T{
+  if(!resource||![resource.artifactId,resource.versionId,resource.projectId,resource.ownerId,resource.organizationId].every(nativeId)||typeof resource.isUserUpload!=='boolean'||!Array.isArray(rootFrameIds)||rootFrameIds.length<1||rootFrameIds.length>256||!rootFrameIds.every(nativeId))throw new ProtectedStorageError('The protected resource read identity is invalid.',403);
+  if(this.resourceReads.getStore())throw new ProtectedStorageError('Nested protected resource reads are not permitted.');
+  return this.resourceReads.run(Object.freeze({...resource,rootFrameIds:Object.freeze([...new Set(rootFrameIds)])}),operation);
+ }
+ /** Resolve only daemon-minted retained-data paths. Absolute paths outside the
+  * reserve are rejected instead of falling through to the legacy store. */
+ storedResourcePath(value:unknown):ProtectedResourcePath|undefined{
+  if(typeof value!=='string'||!isAbsolute(value))return;const target=canonical(value),roots=join(this.reserve,'roots');
+  if(!under(roots,target)||under(this.hostAuth,target))throw new ProtectedStorageError('An absolute resource path is outside the protected reserve.',403);
+  const parts=relative(roots,target).split(sep);
+  if(parts.length!==5||!/^[a-f0-9]{32}$/.test(parts[0])||!['artifacts','uploads'].includes(parts[1])||!segment(parts[2])||!segment(parts[3])||parts[4]!=='content')throw new ProtectedStorageError('The absolute resource path was not minted by the protected resource store.',403);
+  const expected=this.resourceReads.getStore();if(!expected)throw new ProtectedStorageError('A checked protected resource read lease is required.',403);
+  if(value!==target||parts[1]!== (expected.isUserUpload?'uploads':'artifacts')||parts[2]!==expected.artifactId||parts[3]!==expected.versionId)throw new ProtectedStorageError('The protected resource path does not match its exact native identity.',403);
+  const protectedRoot=join(roots,parts[0]);this.ensureDirectory(protectedRoot);const ownerPath=join(protectedRoot,'owner.json');let owner:unknown;try{owner=JSON.parse(this.readStable(ownerPath,4096).toString('utf8'))}catch(error){if(error instanceof ProtectedStorageError)throw error;throw new ProtectedStorageError('The protected resource owner record is unavailable.',403)}
+  if(!Array.isArray(owner)||owner.length!==4||owner[0]!==expected.organizationId||owner[1]!==expected.ownerId||owner[2]!==expected.projectId||typeof owner[3]!=='string'||!expected.rootFrameIds.includes(owner[3])||digest(JSON.stringify(owner)).slice(0,32)!==parts[0])throw new ProtectedStorageError('The protected resource belongs to a different research scope.',403);
+  const basePath=join(roots,parts[0],parts[1]);this.ensureDirectory(basePath);this.assertFile(target);
+  return Object.freeze({absolutePath:target,storagePath:target,basePath,relativePath:relative(basePath,target)});
  }
  workspacePath(frameId:string,standardPath:string){const scope=this.options.scopeForFrame(frameId);return scope?this.layout(scope).workspace:standardPath}
  kernelBase(_manager:any,frameId:string,standardBase:string){const scope=this.options.scopeForFrame(frameId);return scope?this.layout(scope).workspaceBase:standardBase}
@@ -106,5 +161,10 @@ export class ProtectedStorage {
   for(const path of [layout.workspace,layout.temp])rows.push(`(deny file-write-unlink file-write-create (literal ${quote(path)}))`);
   return policy+'\n'+rows.join('\n')+'\n';
  }
- callbacks(){return {nativeProtectedWorkspacePath:(frame:string,path:string)=>this.workspacePath(frame,path),nativeProtectedKernelBase:(manager:any,frame:string,path:string)=>this.kernelBase(manager,frame,path),nativeProtectedSpawnPaths:(manager:any,request:any,derived:any)=>this.configureNativeSpawn(manager,request,derived),nativeProtectedStoragePolicy:(config:any,policy:string)=>this.appendNativePolicy(config,policy)}}
+ callbacks(){return {
+  nativeProtectedWorkspacePath:(frame:string,path:string)=>this.workspacePath(frame,path),nativeProtectedKernelBase:(manager:any,frame:string,path:string)=>this.kernelBase(manager,frame,path),nativeProtectedSpawnPaths:(manager:any,request:any,derived:any)=>this.configureNativeSpawn(manager,request,derived),nativeProtectedStoragePolicy:(config:any,policy:string)=>this.appendNativePolicy(config,policy),
+  nativeProtectedResourceWrite:(input:any)=>this.resourceWritePath(input),nativeProtectedStoredPath:(path:unknown)=>this.storedResourcePath(path),
+  nativeProtectedHostPath:(frame:string,path:string,access:'read'|'write'='read')=>{this.assertHostPath(frame,path,access);return path},
+  nativeProtectedGrantPath:(path:unknown)=>{if(typeof path==='string'&&isAbsolute(path))this.assertGrant(path);return path},
+ }}
 }

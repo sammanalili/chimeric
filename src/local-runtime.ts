@@ -36,6 +36,8 @@ import {createNativeSpeechManager} from './speech-manager';
 import {installSttHttp} from './stt-http';
 import {NativeSecurityRuntime} from './native-security-runtime';
 import {installResourceHttp} from './resource-http';
+import {NativeExecutionAttestation} from './native-execution-attestation';
+import {latchProtectionEvidence} from './startup-protection';
 
 process.env.DO_NOT_TRACK='1';
 process.env.OPERON_DISABLE_TELEMETRY='1';
@@ -48,6 +50,7 @@ const controlSock = join(resolve(process.env.SCIENCE_LOCAL_PROFILE ?? dataDirArg
 const assetManifest=resolve(process.env.SCIENCE_ASSET_MANIFEST ?? join(dirname(resolve(process.argv[1])),'asset-manifest.json'));
 const assetInfo=JSON.parse(readFileSync(assetManifest,'utf8'));
 const assetsRoot=assetInfo.rootRelative ? resolve(dirname(assetManifest),assetInfo.rootRelative) : assetInfo.root;
+const packageResources=resolve(dirname(assetManifest),'..');
 const productIcon=readFileSync(join(assetsRoot,'web-dist/favicon.svg'),'utf8');
 if(!existsSync(join(assetsRoot,'drizzle/sqlite/meta/_journal.json')))throw new Error('Local runtime assets are incomplete. Run start.py build.');
 mkdirSync(profile, { recursive: true, mode: 0o700 });
@@ -68,6 +71,11 @@ const identity = existsSync(identityPath) ? JSON.parse(readFileSync(identityPath
 if (!existsSync(identityPath)) atomicJson(identityPath, identity);
 const authDir = join(profile, 'local-auth'); mkdirSync(authDir, { recursive: true, mode: 0o700 });
 atomicJson(join(authDir, 'active-org.json'), { org_uuid: identity.org_uuid });
+const executionAttestation=new NativeExecutionAttestation(profile,packageResources);
+const evidenceLatch=latchProtectionEvidence(()=>executionAttestation.evidence());
+const initialExecutionEvidence=evidenceLatch.initial;
+const offlineExecution=initialExecutionEvidence.verified?executionAttestation.offlineExecution():undefined;
+const protectionEvidence=evidenceLatch.current;
 
 const registry = Registry.fromFile(process.env.SCIENCE_PROVIDER_CONFIG, profile);
 const claudeCode=new ClaudeCodeModels(profile);registry.claudeCode=claudeCode;
@@ -91,13 +99,13 @@ if (!['url','status','stop','--help','--version','help'].includes(process.argv[2
 const token = randomUUID() + randomUUID();
 // This verified single-user native revision uses local-dev as getUser().user_id.
 // A provider account_uuid is a separate display/auth identity.
-const confidentiality=new ConfidentialityManager(registry,{owner:{userId:'local-dev',organizationId:identity.org_uuid},transport:createOutboundTransport(),changed:()=>connections?.notifyServiceChange(),nativeBoundary:{
+const confidentiality=new ConfidentialityManager(registry,{owner:{userId:'local-dev',organizationId:identity.org_uuid},transport:createOutboundTransport({credential:binding=>registry.getPrivateCredential(binding.id)}),changed:()=>connections?.notifyServiceChange(),protectionEvidence,offlineExecution,nativeBoundary:{
  transition:(context,target,apply)=>requireNativeSecurity().transition(context,target,apply),
  noteExecution:(kind,context)=>requireNativeSecurity().noteExecution(kind,context),
  assertHostContext:owner=>requireNativeSecurity().assertHostContext(owner),
  beginModel:context=>requireNativeSecurity().beginModel(context),
 }});
-nativeSecurity=new NativeSecurityRuntime({profileDir:profile,authDir,assetsRoot,owner:{userId:'local-dev',organizationId:identity.org_uuid},confidentiality,onResourcePolicyChange:()=>connections?.notifyServiceChange()});
+nativeSecurity=new NativeSecurityRuntime({profileDir:profile,authDir,assetsRoot,owner:{userId:'local-dev',organizationId:identity.org_uuid},confidentiality,executionAttestation:initialExecutionEvidence.verified?executionAttestation:undefined,onResourcePolicyChange:()=>connections?.notifyServiceChange()});
 const bridge = startBridge(registry, token,0,undefined,confidentiality);
 const baseUrl = 'http://127.0.0.1:' + bridge.port;
 // Only a loopback session token enters the original daemon. Provider keys stay

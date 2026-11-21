@@ -28,6 +28,7 @@ const app = Bun.serve({hostname: '127.0.0.1', port: 0,
     if (path === '/bytes') return new Response(await req.arrayBuffer(), {headers: {'content-type': 'application/octet-stream'}});
     if (path === '/range') return new Response(bytes.subarray(5, 15), {status: 206, headers: {'content-type': 'application/octet-stream', 'content-range': 'bytes 5-14/262144'}});
     if (path === '/redirect') return new Response(null, {status: 302, headers: {location: `http://localhost:${server.port}/projects/example`, 'set-cookie': 'operon_auth=fixture; HttpOnly; SameSite=Strict; Path=/'}});
+    if (path === '/api/local/resources/policy') return Response.json({query: new URL(req.url).search, origin: req.headers.get('origin'), cookie: req.headers.get('cookie'), csrf: req.headers.get('x-operon-csrf')}, {headers: {'cache-control': 'no-store, private', 'x-content-type-options': 'nosniff', vary: 'Cookie'}});
     if (path === '/html') return new Response('<html><head><script nonce="fixture">globalThis.__OPERON__=Object.assign({},globalThis.__OPERON__,' + JSON.stringify({sandboxOrigin: `http://localhost:${sandbox.port}`, sandboxAltHosts: [], nested: {kept: true}}) + ')</script></head><body>native</body></html>', {headers: {'content-type': 'text/html', 'content-security-policy': `default-src 'self'; script-src 'nonce-fixture'; frame-src 'self' http://localhost:${sandbox.port}; frame-ancestors 'none'`, 'x-frame-options': 'DENY'}});
     if (path === '/unsafe-template') return new Response('<html>changed viewer</html>', {headers: {'content-type': 'text/html', 'content-security-policy': "frame-ancestors 'none'"}});
     return Response.json({method: req.method, origin: req.headers.get('origin'), host: req.headers.get('host'), cookie: req.headers.get('cookie'), csrf: req.headers.get('x-operon-csrf'), forwarded: req.headers.get('x-forwarded-host'), identity: req.headers.get('tailscale-user-login')});
@@ -69,6 +70,15 @@ test('authorized requests keep native cookies and CSRF with a validated upstream
   const response = await request('/', {method: 'POST', headers: {...headers(), origin: appOrigin, cookie: 'operon_auth=fixture', 'x-operon-csrf': 'same-token'}});
   expect(response.status).toBe(200);
   expect(JSON.parse(response.text)).toEqual({method: 'POST', origin: config.appUpstream, host: `127.0.0.1:${app.port}`, cookie: 'operon_auth=fixture', csrf: 'same-token', forwarded: null, identity: null});
+});
+
+test('Tailnet resource policy keeps the exact query, native session checks and private response boundary', async () => {
+ const path='/api/local/resources/policy?versionId=version-a&consumerFrameId=frame-a',before=hits;
+ const denied=await request(path,{headers:{...headers(),'tailscale-user-login':'other@example.test'}});expect(denied.status).toBe(403);expect(hits).toBe(before);
+ const result=await request(path,{headers:{...headers(),origin:appOrigin,cookie:'operon_auth=fixture','x-operon-csrf':'same-token'}});expect(result.status).toBe(200);
+ expect(JSON.parse(result.text)).toEqual({query:'?versionId=version-a&consumerFrameId=frame-a',origin:config.appUpstream,cookie:'operon_auth=fixture',csrf:'same-token'});
+ expect(result.headers['cache-control']).toBe('no-store, private');expect(result.headers['x-content-type-options']).toBe('nosniff');expect(String(result.headers.vary).toLowerCase()).toContain('cookie');
+ expect((await request(path,{kind:'sandbox'})).status).toBe(404);
 });
 
 test('the remote app gets its own renderer without changing script or frame-ancestor policy', async () => {

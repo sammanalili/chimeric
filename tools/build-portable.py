@@ -1,12 +1,20 @@
 """Export the checked Linux browser runtime without private profile data."""
 from __future__ import annotations
-import argparse, gzip, hashlib, io, json, os, re, shutil, subprocess, tarfile, tempfile
+import argparse, gzip, hashlib, io, json, os, re, shutil, subprocess, tarfile, tempfile, time
 from pathlib import Path
 
 EXPECTED_BINARY_SHA256 = "15261d747064ae49a124d9e416b0c9e2c1d78285a0b2b04534d394d922b12355"
 EXPECTED_SOURCE_SHA256 = "9fd2e4e942385471ce1000b0f63873c57e2dfd5c768dbcb7b0c917fa227673c7"
 REQUIRED_RUNTIME = ("chimeric.js", "local-runtime.js", "chatgpt-credentials.js", "provider-settings.js", "antigravity-settings.js", "image-generation-settings.js", "decision-settings.js", "usage-indicator.js", "voice-settings.js", "class2-settings.js", "provider-events.js", "protected-resource-view.js", "local_asr.py", "sqliteWorkerEntry.js", "orgsImportWorker.js", "sandbox/gitScanWorker.js", "stallWatchdogEntry.js", "asset-manifest.json", "patch-manifest.json")
 BROWSER_MODULES = frozenset({"chatgpt-credentials.js", "provider-settings.js", "antigravity-settings.js", "image-generation-settings.js", "decision-settings.js", "usage-indicator.js", "voice-settings.js", "class2-settings.js", "provider-events.js", "protected-resource-view.js"})
+CLASS2_REQUIRED_BOUNDARIES = (
+    "native-scope-task", "native-scope-metadata", "native-scope-sdk-fetch", "native-scope-runner", "native-scope-agent-job",
+    "native-policy-registry-tool", "native-policy-host-call", "native-policy-kernel", "native-policy-tool-dispatch", "native-policy-compute-dispatch", "native-policy-network-grant", "native-policy-process", "native-policy-shell",
+    "native-kernel-execute-entry", "native-kernel-start-entry", "native-kernel-host-dispatch", "native-kernel-process-attached", "native-kernel-manager-registration", "native-kernel-manager-release", "native-kernel-acquire", "native-kernel-bind", "native-kernel-start-generation", "native-kernel-host-context",
+    "native-runtime-task-enter", "native-runtime-task-leave", "native-runtime-background", "native-runtime-agent-enter", "native-runtime-agent-leave", "native-runtime-services",
+    "native-private-workspace", "native-private-kernel-base", "native-private-policy-1", "native-private-policy-2", "native-private-spawn-layout",
+    "native-resource-save-_saveArtifactCommon", "native-resource-save-save_user_upload_streaming", "native-resource-http-read", "native-resource-upload-request",
+)
 
 def release_metadata() -> dict:
     package = json.loads((Path(__file__).resolve().parents[1] / "package.json").read_text())
@@ -71,6 +79,39 @@ def _sha256(path: Path) -> str:
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""): digest.update(chunk)
     return digest.hexdigest()
+
+def _write_class2_receipt(resources: Path, *, platform: str, epoch_ms: int | None = None) -> dict:
+    """Write the receipt that the sealed macOS app verifies before Class 2.
+
+    Linux exports intentionally cannot call this helper. Their browser runtime
+    has not passed the native process and file-confinement acceptance suite.
+    """
+    if platform != "darwin-arm64": raise ValueError("Class 2 execution receipts are supported only for the verified macOS target")
+    resources = resources.resolve(); runtime = resources / "runtime"
+    patches, manifest = _read_json(runtime / "patch-manifest.json"), _read_json(runtime / "asset-manifest.json")
+    if patches.get("platform") != platform: raise ValueError("Class 2 patch journal has the wrong platform")
+    if patches.get("class2RequiredBoundaries") != list(CLASS2_REQUIRED_BOUNDARIES): raise ValueError("Class 2 patch journal has a different required-boundary set")
+    boundaries = patches.get("boundaries")
+    if not isinstance(boundaries, list) or any(name not in boundaries for name in CLASS2_REQUIRED_BOUNDARIES): raise ValueError("Class 2 patch journal is missing a required native boundary")
+    archive = manifest.get("archive")
+    if not isinstance(archive, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", archive) or ".." in archive: raise ValueError("Class 2 asset archive name is unsafe")
+    names = ("runtime/chimeric.js", "runtime/local-runtime.js", "bin/chimeric", "runtime/patch-manifest.json", "runtime/asset-manifest.json", f"runtime/{archive}")
+    files = {}
+    for name in names:
+        path = resources / name
+        if not _inside(path, resources) or not path.is_file() or path.is_symlink(): raise ValueError(f"Class 2 bound file is missing or unsafe: {name}")
+        files[name] = _sha256(path)
+    if files["runtime/chimeric.js"] != patches.get("outputSha256"): raise ValueError("Class 2 runtime entry does not match the patch journal")
+    asset_tree = manifest.get("sha256")
+    if not isinstance(asset_tree, str) or not re.fullmatch(r"[a-f0-9]{64}", asset_tree): raise ValueError("Class 2 asset tree digest is invalid")
+    epoch = int(time.time() * 1000) if epoch_ms is None else epoch_ms
+    if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 0: raise ValueError("Class 2 attestation epoch is invalid")
+    receipt = {"schemaVersion": 1, "platform": platform, "attestationEpoch": epoch,
+               "requiredBoundaries": list(CLASS2_REQUIRED_BOUNDARIES), "assetTreeTarSha256": asset_tree, "files": files}
+    path = runtime / "class2-build-receipt.json"
+    path.write_text(json.dumps(receipt, separators=(",", ":")) + "\n"); path.chmod(0o644)
+    return {"path": "Contents/Resources/runtime/class2-build-receipt.json", "sha256": _sha256(path),
+            "attestationEpoch": epoch, "platform": platform, "protectedExecution": True}
 
 def _validate_asset_tree(assets: Path, asset_sha: str) -> None:
     if not assets.is_dir() or assets.is_symlink(): raise ValueError("asset root must be a regular directory")
@@ -170,7 +211,8 @@ def export_bundle(runtime: Path, binary: Path, out: Path, *, expected_binary_sha
         metadata = release_metadata()
         (stage / "chimeric-version.json").write_text(json.dumps(metadata, indent=2) + "\n")
         command = stage / "chimeric"; command.write_text('#!/bin/sh\nset -eu\nCHIMERIC_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexport BUN_BE_BUN=1\nexec "$CHIMERIC_ROOT/bin/chimeric" "$CHIMERIC_ROOT/launcher.mjs" "$@"\n'); command.chmod(0o755)
-        record = {**metadata, "platform": "linux-x64", "nativeSourceSha256": patches["sourceSha256"], "binarySha256": expected_binary_sha256, "backendBundleSha256": _sha256(stage / "runtime/local-runtime.js"), "assetArchiveRawGzipSha256": raw_archive_sha, "assetTreeTarSha256": tree_sha, "moduleVersion": manifest["moduleVersion"], "antigravityTransport": transport, "privateProfileIncluded": False, "executionVerified": False}
+        record = {**metadata, "platform": "linux-x64", "nativeSourceSha256": patches["sourceSha256"], "binarySha256": expected_binary_sha256, "backendBundleSha256": _sha256(stage / "runtime/local-runtime.js"), "assetArchiveRawGzipSha256": raw_archive_sha, "assetTreeTarSha256": tree_sha, "moduleVersion": manifest["moduleVersion"], "antigravityTransport": transport, "privateProfileIncluded": False, "executionVerified": False,
+                  "class2Protection": {"supported": False, "reason": "Native Class 2 execution has not been verified on Linux/WSL."}}
         (stage / "BUNDLE-BUILD.json").write_text(json.dumps(record, indent=2) + "\n"); (stage / "NOTICE.txt").write_text("Chimeric integrates the local research runtime 0.1.71. Original component copyright and license notices remain in the bundled assets. This development export has not completed the portable release audit.\n")
         os.replace(stage, out); return record
     except Exception:

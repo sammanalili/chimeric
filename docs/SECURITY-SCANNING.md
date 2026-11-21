@@ -20,18 +20,16 @@ ClamAV checks the source and the selected artifacts, including supported archive
 
 A successful scan means these tools found no unresolved matches in those exact bytes. It cannot prove that software is malware-free, replace code review, or close the other release gates. Keep the scan report with the release hashes and retain the pending gates in [release-status.json](../release-status.json).
 
-## Final release-candidate scan
+## Latest local release-candidate scan
 
-The 2026-11-20 scan covered the reviewed 292-file source boundary, the Mac app and ZIP, and the Linux x64 directory and tarball.
+The 2026-11-21 scan covered the reviewed source boundary, the Apple Silicon Mac app and its ZIP. Linux artifacts require their own scan record after a verified Linux build.
 
-- Source boundary: 292 files. The exact SHA-256 is stored in the external scan record so the source documentation does not attempt to contain its own hash.
-- Mac app directory-snapshot SHA-256: `d1c35e642b2132d5d8b658188090e4f06a1897d8cefc11f3646cb6d5f7361cb3`
-- Mac ZIP SHA-256: `886ed2deaf24c934324da9b7789de23818f1456cd23ff3595c2c8a6a4f6df0c9`
-- Linux x64 directory-snapshot SHA-256: `89444dab20381ff390df5722102a3557edcb5313527c1e6ea17e93b0c16148fe`
-- Linux x64 tarball SHA-256: `6b2ef110486479a12a623a06fa4026305497d2afd3139d43fc74c4709cf48ea9`
+- Source boundary: 299 files. The exact SHA-256 is stored in the private scan record so the source documentation does not attempt to contain its own hash.
+- Mac app directory-snapshot SHA-256: `443569d53111956bf555d2596a8f66a36eee464c644ea93f7d1f96928ae6a48f`
+- Mac ZIP SHA-256: `357925befe999550dfa13bd81c5a727d8bc511a0553c7be185e37644cd83694b`
 - Gitleaks 8.30.1: zero unreviewed findings and two exact reviewed findings
-- ClamAV 1.5.5, database 28188: zero infected files and zero errors; the exact file count is recorded externally
+- ClamAV 1.5.5, database 28189: zero infected files and zero errors; the exact file count is recorded privately
 
-The record is `work/release-goal-20261120/final-release-scan.json` in the private release evidence directory. The Mac candidate passes strict local arm64 code-signature verification with an ad-hoc signature. It is not notarized. Git-history secret scanning, runtime credential isolation and redistribution rights remain separate checks.
+The records are stored in the private release evidence directory. The Mac candidate passes strict local arm64 code-signature verification with an ad-hoc signature. It is not notarized. Git-history secret scanning, runtime credential isolation and redistribution rights remain separate checks.
 
 The command formats follow the official [Gitleaks documentation](https://github.com/gitleaks/gitleaks) and [ClamAV scanning documentation](https://docs.clamav.net/manual/Usage/Scanning.html).

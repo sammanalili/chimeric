@@ -1,22 +1,22 @@
 {
   "product": "Chimeric",
-  "version": "0.3.0-rc.1",
+  "version": "0.3.0-rc.2",
   "channel": "prerelease",
-  "reviewedOn": "2026-11-20",
+  "reviewedOn": "2026-11-21",
   "releaseGates": [
     {
       "id": "source-checks",
       "status": "passed",
       "requirement": "The clean source boundary, documentation links, credential exclusions and regression tests pass on the exported tree.",
       "evidence": "docs/SOURCE-VERIFICATION.json",
-      "note": "The reviewed 292-file clean-export boundary passed the strict release check, 898 Bun tests with 63 expected fixture skips, and 61 Python tests with four expected fixture skips."
+      "note": "The reviewed source export passed the strict release check. The final scan record identifies the exact exported bytes separately, so this public status file does not become self-referential."
     },
     {
       "id": "artifact-scan",
       "status": "passed",
-      "requirement": "The exact frozen source, Mac app and ZIP, and Linux x64 directory and tarball pass the configured local secret and malware-signature scans.",
-      "evidence": "work/release-goal-20261120/final-release-scan.json",
-      "note": "Gitleaks reported zero unreviewed and three exact reviewed findings. ClamAV database 28188 reported zero infected files and zero errors. The external record contains exact hashes and counts. This does not prove the absence of malware or vulnerabilities."
+      "requirement": "The exact frozen source, Apple Silicon Mac app and Mac ZIP pass the configured local secret and malware-signature scans. Linux artifacts require their own verified-build scan record.",
+      "evidence": "docs/SECURITY-SCANNING.md",
+      "note": "Gitleaks reported zero unreviewed and two exact reviewed findings. ClamAV database 28189 reported zero infected files and zero errors. The private record contains exact hashes and counts. This does not prove the absence of malware or vulnerabilities."
     },
     {
       "id": "fresh-profile",
@@ -72,8 +72,10 @@
     },
     {
       "id": "protected-research",
-      "status": "disabled",
-      "requirement": "Class 2 activation fails closed until credential paths, durable kernel history and all execution consumers pass together."
+      "status": "pending",
+      "requirement": "The packaged release must activate Class 2 and complete the protected model, storage, browser, reviewed-egress and native-execution workflow without exposing protected data to an unapproved path.",
+      "evidence": "docs/CLASS2-VALIDATION.md",
+      "note": "Fail-closed source guards pass, but usable Class 2 operation remains under implementation and packaged validation. Disabled operation does not close this gate."
     },
     {
       "id": "runtime-distribution",
@@ -92,7 +94,9 @@
     {
       "id": "final-release-audit",
       "status": "pending",
-      "requirement": "The frozen source, candidate hashes, notices, private-path exclusions and user-facing claims receive one final review."
+      "requirement": "The frozen source, candidate hashes, notices, private-path exclusions and user-facing claims receive one final review.",
+      "evidence": "docs/RELEASE-AUDIT.md",
+      "note": "The audit remains open until the Class 2 implementation and its exact packaged evidence are frozen and reviewed with the other release records."
     }
   ]
 }

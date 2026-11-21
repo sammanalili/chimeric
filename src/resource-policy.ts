@@ -19,6 +19,7 @@ const stateSchema=z.object({schemaVersion:z.literal(1),revision:z.number().int()
 type State=z.infer<typeof stateSchema>;
 export type ResourceReleaseDraft=Readonly<{versionId:string;checksum:string;binding:string;consumerFrameId:string;consumerRootFrameId:string;consumerRevision:number;purpose:ResourcePurpose;destination:ResourceDestination;expiresAt:number;revision:number}>;
 export type ResourceLease=Readonly<{versionId:string;artifactId:string;dataClass:ResourceClass;purpose:ResourcePurpose;binding:string}>;
+export type ResourceMaterialization=Readonly<{storageRootFrameIds:readonly string[]}>;
 type LeaseState={resource:NativeArtifactContext;context?:ResourceContext;purpose:ResourcePurpose;release?:z.infer<typeof releaseSchema>;materialized?:boolean};
 export type ResourcePolicyDependencies={
  owner:{userId:string;organizationId:string};
@@ -135,10 +136,14 @@ export class ResourcePolicyStore{
   else if(!this.allowed(resource,classification,state.context,state.purpose))fail('protected_resource','The resource permission changed before reading.');
  }
  /** reader is a trusted local materializer; this does not authorize networking. */
- async materialize<T>(lease:ResourceLease,reader:(resource:NativeArtifactContext)=>T|Promise<T>):Promise<T>{const state=this.leases.get(lease);if(!state)fail('untrusted_lease','A native resource read lease is required.');if(state.release&&state.materialized)fail('release_unavailable','The reviewed resource read was already used.');state.materialized=true;await this.assertCurrent(lease);const value=await reader(state.resource);await this.assertCurrent(lease);return value}
+ async materialize<T>(lease:ResourceLease,reader:(resource:NativeArtifactContext,evidence:ResourceMaterialization)=>T|Promise<T>):Promise<T>{const state=this.leases.get(lease);if(!state)fail('untrusted_lease','A native resource read lease is required.');if(state.release&&state.materialized)fail('release_unavailable','The reviewed resource read was already used.');state.materialized=true;await this.assertCurrent(lease);const record=this.record(state.resource),storageRootFrameIds=Object.freeze((record?.sourceRoots??[]).filter(root=>this.state.roots.some(candidate=>candidate.organizationId===state.resource.organizationId&&candidate.rootFrameId===root&&candidate.dataClass==='class2')));const value=await reader(state.resource,Object.freeze({storageRootFrameIds}));await this.assertCurrent(lease);return value}
  async filterMetadata<T>(rows:ReadonlyArray<T>,consumerFrameId:string|undefined,lookup:(row:T)=>ArtifactLookup):Promise<T[]>{if(rows.length>65536)fail('resource_limit','Too many resource rows.');const result:T[]=[];for(const row of rows)try{await this.authorize(lookup(row),consumerFrameId,'metadata');result.push(row)}catch(error){if(!(error instanceof ResourcePolicyError))throw error}return result}
  async renderDecision(input:ArtifactLookup&{consumerFrameId?:string}){
   try{const lookup:ArtifactLookup=input.versionId?{versionId:input.versionId}:{artifactId:input.artifactId!},resource=await this.resolve(lookup),context=input.consumerFrameId?await this.captureFrame(input.consumerFrameId):undefined;
+   // Once protected research exists, an active browser mount must name the
+   // trusted owning frame. A missing frontend binding must never fall back to
+   // a context-free standard renderer in another open chat.
+   if(!context&&(this.protectedHistory||this.deps.protectionEnabled?.()===true))fail('consumer_required','This preview needs its owning research chat.',403);
    const roots=this.record(resource)?.sourceRoots??sourceRoots(resource),revisions=await Promise.all(roots.map(async root=>{const source=await this.captureFrame(root);return {rootFrameId:source.rootFrameId,revision:source.revision}}));if(context)await this.current(context);
    const classification=this.classification(resource),allowed=this.allowed(resource,classification,context,'metadata'),decision=allowed&&(classification==='standard'||this.compatibility(context))&&context?.mode!=='class2'?'standard':allowed?'inert':'blocked';
    return {revision:this.state.revision,decision,resource:{artifactId:resource.artifactId,versionId:resource.versionId,checksum:resource.checksum,dataClass:classification,sourceRootFrameIds:roots,sourcePolicyRevisions:revisions,consumerRootFrameId:context?.rootFrameId,consumerPolicyRevision:context?.revision},binding:hash([resourceBinding(resource),this.state.revision,context??null]),...(decision==='blocked'?{reason:'This source has no verified permission for the current research chat.'}:{})};

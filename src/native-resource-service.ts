@@ -1,5 +1,6 @@
 import {AsyncLocalStorage} from 'node:async_hooks';
-import {ResourcePolicyError,ResourcePolicyStore,type ResourceContext,type ResourcePurpose} from './resource-policy';
+import {ResourcePolicyError,ResourcePolicyStore,type ResourceContext,type ResourceMaterialization,type ResourcePurpose} from './resource-policy';
+import type {NativeArtifactContext} from './native-artifact-context';
 import {SessionPolicyError} from './session-policy';
 import type {ArtifactLookup} from './native-artifact-context';
 import type {NativeResourceCallbacks} from '../tools/native-resource-policy';
@@ -31,6 +32,8 @@ export class NativeResourceService implements NativeResourceCallbacks {
   currentFrame?:()=>string|undefined;
   protectionEnabled:()=>boolean;
   ownerUserId:string;
+  withProtectedWrite?:<T>(frameId:string,kind:'artifact'|'upload',operation:()=>Promise<T>)=>Promise<T>;
+  withProtectedRead?:<T>(resource:NativeArtifactContext,evidence:ResourceMaterialization,operation:()=>Promise<T>)=>Promise<T>;
  }){}
  private open(){if(this.closed)throw new ResourcePolicyError('closed','The native resource boundary is closed.',503)}
  private legacyOpen(){const state=this.policy.snapshot();return this.options.protectionEnabled()===false&&!state.protectedHistory&&!state.roots.some(row=>row.dataClass==='class2')&&!state.resources.some(row=>row.dataClass==='class2')}
@@ -44,7 +47,7 @@ export class NativeResourceService implements NativeResourceCallbacks {
  private async read(operation:{method:string;args:unknown[]},purpose:ResourcePurpose,read:()=>Promise<unknown>){
   this.open();const exact=this.exact(operation),consumer=this.frame();
   if(!exact){if(this.legacyOpen())return await read();throw new ResourcePolicyError('unbound_resource','The native resource read has no exact version binding.')}
-  const lease=await this.policy.authorize(exact,consumer,purpose);return await this.policy.materialize(lease,()=>read());
+  const lease=await this.policy.authorize(exact,consumer,purpose);return await this.policy.materialize(lease,(resource,evidence)=>this.options.withProtectedRead?this.options.withProtectedRead(resource,evidence,read):read());
  }
  metadata(_owner:unknown,operation:{method:string;args:unknown[]},read:()=>Promise<unknown>){return this.read(operation,'metadata',read)}
  materialize(_owner:unknown,operation:{method:string;args:unknown[]},read:()=>Promise<unknown>){return this.read(operation,'model-input',read)}
@@ -53,9 +56,17 @@ export class NativeResourceService implements NativeResourceCallbacks {
   const consumer=this.frame(),result=[];for(const row of rows){const exact=this.row(row);if(!exact){if(this.legacyOpen())result.push(row);continue}try{await this.policy.authorize(exact,consumer,'metadata');result.push(row)}catch(error){if(!(error instanceof ResourcePolicyError))throw error}}
   return result;
  }
- private async saved(input:any,write:()=>Promise<unknown>){
+ private async saved(input:any,write:()=>Promise<unknown>,kind:'artifact'|'upload'){
   this.open();let context:ResourceContext|undefined;
-  try{context=await this.context(input?.frame_id??input?.frameId??input?.root_frame_id??input?.rootFrameId)}
+  try{
+   // Multipart and chunked uploads inherit the authenticated composer context
+   // captured by withUploadRequest. The upload store's root_frame_id is a shared uploads
+   // container and must never replace that real producing chat.
+   const scoped=kind==='upload'?this.scope.getStore()?.context:undefined;
+   context=await this.context(scoped?.frameId??input?.frame_id??input?.frameId??input?.root_frame_id??input?.rootFrameId);
+   if(context&&scoped&&[context.frameId,context.rootFrameId,context.projectId,context.ownerId].some((value,index)=>value!==[scoped.frameId,scoped.rootFrameId,scoped.projectId,scoped.ownerId][index]))throw new ResourcePolicyError('scope_changed','The authenticated upload scope changed before storage.',409);
+   if(context&&typeof input?.project_id==='string'&&input.project_id!==context.projectId)throw new ResourcePolicyError('scope_changed','The native resource project does not match its authenticated chat.',409);
+  }
   catch(error){
    // Bundled examples save their ordinary artifacts before committing the new
    // frame row. Preserve that startup order only while the explicit legacy
@@ -64,13 +75,16 @@ export class NativeResourceService implements NativeResourceCallbacks {
    if(!(error instanceof SessionPolicyError&&error.code==='frame_unavailable'&&this.legacyOpen()))throw error;
   }
   if(!context&&!this.legacyOpen())throw new ResourcePolicyError('missing_resource_scope','The native save has no authenticated research chat.');
-  const value=await write();if(!context)return value;
-  const ids=versionIds(value);if(!ids.length)throw new ResourcePolicyError('unclassified_write','The committed native resource did not return an exact version ID.',503);
-  const sources=[...(Array.isArray(input?.source_version_ids)?input.source_version_ids:[]),input?.parent_version_id,input?.parentVersionId].filter(id) as string[];
-  for(const versionId of ids)await this.policy.recordCreated(context,{versionId},{sourceVersionIds:sources});return value;
+  const commit=async()=>{
+   const value=await write();if(!context)return value;
+   const ids=versionIds(value);if(!ids.length)throw new ResourcePolicyError('unclassified_write','The committed native resource did not return an exact version ID.',503);
+   const sources=[...(Array.isArray(input?.source_version_ids)?input.source_version_ids:[]),input?.parent_version_id,input?.parentVersionId].filter(id) as string[];
+   for(const versionId of ids)await this.policy.recordCreated(context,{versionId},{sourceVersionIds:sources});return value;
+  };
+  return context&&this.options.withProtectedWrite?await this.options.withProtectedWrite(context.frameId,kind,commit):await commit();
  }
- save(_owner:unknown,input:unknown,write:()=>Promise<unknown>){return this.saved(input,write)}
- saveUpload(_owner:unknown,input:unknown,write:()=>Promise<unknown>){return this.saved(input,write)}
+ save(_owner:unknown,input:unknown,write:()=>Promise<unknown>){return this.saved(input,write,'artifact')}
+ saveUpload(_owner:unknown,input:unknown,write:()=>Promise<unknown>){return this.saved(input,write,'upload')}
  async withUploadRequest(app:any,request:any,operation:()=>Promise<unknown>){
   this.open();const user=app?.getUser?.(request),userId=nativeUserId(user);if(userId!==this.options.ownerUserId)throw new ResourcePolicyError('not_owner','The native upload owner could not be verified.');
   const explicit=request?.query?.frameId??request?.query?.frame_id??request?.headers?.['x-chimeric-frame-id'];const context=await this.context(explicit);

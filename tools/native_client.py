@@ -18,18 +18,25 @@ from pathlib import Path
 
 class NativeClient:
     def __init__(self, executable: str, entry: str, profile: str, port: int):
-        self.base = f"http://localhost:{port}"
+        # ``launcher session`` binds its nonce to the loopback origin it
+        # returns, currently 127.0.0.1.  Keep the redeeming Origin identical.
+        self.base = f"http://127.0.0.1:{port}"
         self.jar = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
         env = os.environ.copy()
         env["BUN_BE_BUN"] = "1"
-        command = [executable, entry, "url", "--data-dir", profile]
+        # The packaged launcher owns profile and port selection.  Calling the
+        # runtime's old ``url --data-dir`` path no longer talks to a running
+        # packaged daemon, so mint a one-use session from the launcher instead.
+        command = [executable, entry, "session", "--profile", profile, "--port", str(port)]
         result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20)
         nonce = None
-        for link in re.findall(r"https?://[^\s\x1b]+", result.stdout):
+        for link in re.findall(r"https?://[^\s\x1b\"}]+", result.stdout):
             url = urllib.parse.urlsplit(link)
             if url.hostname in {"localhost", "127.0.0.1"} and url.port == port:
-                nonce = urllib.parse.parse_qs(url.query).get("nonce", [None])[0]
+                candidate = urllib.parse.parse_qs(url.query).get("nonce", [None])[0]
+                if candidate:
+                    nonce = candidate
         if not nonce:
             raise RuntimeError("the selected local daemon did not issue a bootstrap nonce")
         data = urllib.parse.urlencode({"nonce": nonce, "dest": "/"}).encode()

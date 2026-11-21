@@ -1,4 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {isAbsolute,normalize} from 'node:path';
 import {Registry} from './registry';
 import {lookupFrame} from './native-frame-context';
 import {NativeSessionScope} from './native-scope';
@@ -8,7 +9,66 @@ import type {BridgeAuthorization} from './bridge';
 import type {Class2Snapshot,Class2ConnectionSnapshot} from './class2-http';
 
 const executableApis=new Set(['openai-completions','openai-responses','anthropic-messages']);
+const protectedLocalArtifactTools=new Set(['save_artifacts','read_file']);
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex');
+function plainObject(value:unknown):value is Record<string,unknown>{
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.getPrototypeOf(value)!==Object.prototype)return false;
+ return Reflect.ownKeys(value).every(key=>{const descriptor=typeof key==='string'?Object.getOwnPropertyDescriptor(value,key):undefined;return !!descriptor&&descriptor.enumerable&&'value'in descriptor});
+}
+function denseArray(value:unknown,max:number):value is unknown[]{
+ if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype||value.length>max)return false;
+ return Array.from({length:value.length},(_,index)=>Object.getOwnPropertyDescriptor(value,String(index))).every(descriptor=>!!descriptor&&descriptor.enumerable&&'value'in descriptor)&&
+  Reflect.ownKeys(value).every(key=>key==='length'||typeof key==='string'&&/^(?:0|[1-9][0-9]*)$/.test(key)&&Number(key)<value.length);
+}
+function parseToolInput(value:unknown){
+ if(typeof value==='string'){
+  if(value.length>1024*1024)throw new SessionPolicyError('local_file_input','The local artifact request is too large.',413);
+  try{value=JSON.parse(value)}catch{throw new SessionPolicyError('local_file_input','The local artifact request is invalid.',400)}
+ }
+ if(!plainObject(value))throw new SessionPolicyError('local_file_input','The local artifact request is invalid.',400);return value;
+}
+function workspaceRelative(value:unknown):string|undefined{
+ if(typeof value!=='string'||value.length<1||value.length>4096||value.includes('\0')||isAbsolute(value))return;
+ const selected=normalize(value);if(selected!=='.'&&selected!=='..'&&!selected.startsWith('../'))return selected;
+}
+function invalidLocalFile(message:string):never{throw new SessionPolicyError('local_file_input',message,403)}
+function boundedInteger(value:unknown,min:number,max:number){return Number.isSafeInteger(value)&&(value as number)>=min&&(value as number)<=max}
+function assertProtectedLocalArtifactInput(name:string,value:unknown){
+ const input=parseToolInput(value),keys=Object.keys(input);
+ if(name==='save_artifacts'){
+  // Native tools require a human-facing action label.  It is not an artifact
+  // routing option, but rejecting it here made otherwise valid protected saves
+  // impossible through the normal tool path.
+  const allowed=new Set(['files','language','version_of','environment','checkpoints','destination','human_description']);
+  if(keys.some(key=>!allowed.has(key))||!denseArray(input.files,256)||input.files.length<1||typeof input.language!=='string'||!['python','r','bash','text'].includes(input.language))invalidLocalFile('Protected artifact saves accept only relative files in this chat workspace.');
+  if(input.human_description!==undefined&&(typeof input.human_description!=='string'||input.human_description.length<1||input.human_description.length>500))invalidLocalFile('The protected artifact action description is invalid.');
+  const files=input.files.map(workspaceRelative);if(files.some(path=>path===undefined)||new Set(files).size!==files.length)invalidLocalFile('Protected artifact files must be distinct relative paths in this chat workspace.');
+  const fileSet=new Set(files as string[]);
+  if(input.checkpoints!==undefined){
+   if(!denseArray(input.checkpoints,256))invalidLocalFile('Protected checkpoints must name files in the same save request.');
+   const checkpoints=input.checkpoints.map(workspaceRelative);if(checkpoints.some(path=>path===undefined||!fileSet.has(path))||new Set(checkpoints).size!==checkpoints.length)invalidLocalFile('Protected checkpoints must name distinct files in the same save request.');
+  }
+  if(input.environment!==undefined&&(typeof input.environment!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(input.environment)))invalidLocalFile('The protected artifact environment name is invalid.');
+  if(input.version_of!==undefined){
+   if(!plainObject(input.version_of)||Object.keys(input.version_of).length>256)invalidLocalFile('The protected artifact version map is invalid.');
+   for(const [path,id] of Object.entries(input.version_of))if(!workspaceRelative(path)||typeof id!=='string'||!uuid.test(id))invalidLocalFile('Protected artifact versions require relative filenames and exact artifact identifiers.');
+  }
+  if(input.destination!==undefined){
+   if(!plainObject(input.destination)||Object.keys(input.destination).length>256)invalidLocalFile('The protected artifact destination map is invalid.');
+   for(const [path,destination] of Object.entries(input.destination))if(!workspaceRelative(path)||typeof destination!=='string'||!['working_data','snapshot'].includes(destination))invalidLocalFile('Protected artifact destinations require relative filenames and a supported retention mode.');
+  }
+  return;
+ }
+ const allowed=new Set(['version_id','file_path','offset','limit','pages','human_description']);if(keys.some(key=>!allowed.has(key)))invalidLocalFile('The protected file read contains an unsupported option.');
+ if(input.human_description!==undefined&&(typeof input.human_description!=='string'||input.human_description.length<1||input.human_description.length>500))invalidLocalFile('The protected file read action description is invalid.');
+ const hasVersion=input.version_id!==undefined,hasPath=input.file_path!==undefined;
+ if(hasVersion===hasPath||hasVersion&&(typeof input.version_id!=='string'||!uuid.test(input.version_id))||hasPath&&!workspaceRelative(input.file_path))invalidLocalFile('Protected reads require one exact artifact version or one relative path in this chat workspace.');
+ if(input.offset!==undefined&&!boundedInteger(input.offset,1,10_000_000)||input.limit!==undefined&&!boundedInteger(input.limit,1,1_000_000))invalidLocalFile('Protected text reads require bounded positive line ranges.');
+ if(input.pages!==undefined){
+  if(input.offset!==undefined||input.limit!==undefined||!denseArray(input.pages,100)||input.pages.length<1||input.pages.some(page=>!boundedInteger(page,1,1_000_000))||new Set(input.pages).size!==input.pages.length)invalidLocalFile('Protected document reads require distinct positive page numbers and no text line range.');
+ }
+}
 export type ConfidentialityDependencies={
  owner:{userId:string;organizationId:string};
  lookupFrame?:typeof lookupFrame;
@@ -68,6 +128,7 @@ export class ConfidentialityManager {
  private enforcement(_context:SessionContext,lane:PolicyLane){
   const evidence=this.deps.protectionEvidence?.();if(evidence?.verified!==true)return {verified:false,reason:evidence?.reason??'Class 2 is unavailable until browser and cross-chat file isolation are verified for this build.'};
   if(['model','brokered-http','stt'].includes(lane))return {verified:true};
+  if(lane==='local-files')return {verified:true};
   if(lane==='local-compute'&&this.deps.offlineExecution?.verified&&this.deps.offlineExecution.platform===process.platform)return {verified:true};
   return {verified:false,reason:'This native execution path is not yet verified for protected sessions and is disabled. Use the reviewed outgoing-request tool for external access.'};
  }
@@ -124,12 +185,20 @@ export class ConfidentialityManager {
  }
  async deny(input:{frameId:string;reviewId:string}){const context=await this.context(input.frameId);this.broker.deny(context,input.reviewId);this.finish(input.reviewId,{status:'error',error:'The user declined this external request. No request was sent.'});return this.snapshot({frameId:input.frameId})}
  /** Model tool can propose a request; only the authenticated review action can
-  * approve it. This creates a keyless destination, never a model credential. */
- async prepareOutgoing(frameId:string,input:Omit<OutboundIntent,'connection'>){
+  * approve it. A named API connection is bound here, but its credential is not
+  * resolved until the consumed one-shot permit enters the HTTPS transport. */
+ async prepareOutgoing(frameId:string,input:Omit<OutboundIntent,'connection'>&{connectionId?:string}){
   const context=await this.context(frameId),url=new URL(input.request.url);
   if(url.protocol!=='https:'||url.username||url.password)throw new SessionPolicyError('secure_destination_required','Reviewed external requests require an HTTPS destination without URL credentials.',400);
-  const id='outbound-'+digest(url.origin),binding={id,endpoint:url.origin,api:'reviewed-http',revision:'1',credentialRevision:'keyless'};
-  this.destinations.set(id,binding);const review=await this.broker.prepare(context,{...input,connection:binding});this.deps.changed?.();return review;
+  let binding:ConnectionBinding;
+  if(input.connectionId){
+   const eligible=this.eligibility(input.connectionId);
+   if(!eligible.ready||!eligible.binding)throw new SessionPolicyError('connection_unavailable',eligible.reason??'Choose an available HTTPS API connection.',409);
+   binding=eligible.binding;
+  }else{
+   const id='outbound-'+digest(url.origin);binding={id,endpoint:url.origin,api:'reviewed-http',revision:'1',credentialRevision:'keyless'};this.destinations.set(id,binding);
+  }
+  const {connectionId:_connectionId,...intent}=input;const review=await this.broker.prepare(context,{...intent,connection:binding});this.deps.changed?.();return review;
  }
  async authorize(request:Request,body:any):Promise<BridgeAuthorization>{
   const verified=await this.scope.verify(request,body);
@@ -164,7 +233,7 @@ export class ConfidentialityManager {
    }
   },...p.mode==='class2'?{executeServerTool:async()=>{throw new SessionPolicyError('review_required','External search and fetching require a reviewed outgoing request. Prepare a transformed copy with its purpose and destination for the user to approve.')}}:{}};
  }
- outgoingTool(){return {name:'request_external_access',description:'For user-requested external access in Class 2, prepare the minimum redacted or decontextualized HTTPS request. Explain its purpose and removed information. The user reviews the exact outgoing copy and IP/location disclosures. This tool waits for Send once approval. You cannot grant permission. There are no redirects, retries or account credentials.',input_schema:{type:'object',properties:{rationale:{type:'string'},privacy:{type:'object',properties:{kind:{enum:['redacted','decontextualized']},summary:{type:'string'},limitations:{type:'array',items:{type:'string'}}},required:['kind','summary']},request:{type:'object',properties:{method:{enum:['GET','POST','PUT','PATCH','DELETE']},url:{type:'string'},headers:{type:'object',additionalProperties:{type:'string'}},payload:{type:'object',description:'Exact payload: {kind:"none"}, {kind:"text",contentType,text}, {kind:"json",value}, {kind:"bytes",contentType,base64,filename?}, or {kind:"multipart",fields:[{name,value}],files:[{fieldName,filename,contentType,base64}]}'}},required:['method','url','payload']}},required:['rationale','privacy','request']}}}
+ outgoingTool(){return {name:'request_external_access',description:'For user-requested external access in Class 2, prepare the minimum redacted or decontextualized HTTPS request. Explain its purpose and removed information. The user reviews the exact outgoing copy and IP/location disclosures. This tool waits for Send once approval. You cannot grant permission. There are no redirects or retries. If the user requests a configured API connection, name its connectionId; its credential stays hidden and is attached only after approval.',input_schema:{type:'object',properties:{connectionId:{type:'string',description:'Optional configured HTTPS API connection explicitly requested by the user. Subscription and subprocess connections are unavailable.'},rationale:{type:'string'},privacy:{type:'object',properties:{kind:{enum:['redacted','decontextualized']},summary:{type:'string'},limitations:{type:'array',items:{type:'string'}}},required:['kind','summary']},request:{type:'object',properties:{method:{enum:['GET','POST','PUT','PATCH','DELETE']},url:{type:'string'},headers:{type:'object',additionalProperties:{type:'string'}},payload:{type:'object',description:'Exact payload: {kind:"none"}, {kind:"text",contentType,text}, {kind:"json",value}, {kind:"bytes",contentType,base64,filename?}, or {kind:"multipart",fields:[{name,value}],files:[{fieldName,filename,contentType,base64}]}'}},required:['method','url','payload']}},required:['rationale','privacy','request']}}}
  async executeOutgoing(host:any,call:any,args:any,signal?:AbortSignal){
   if(host._isAside||['REVIEWER','AUDITOR','BOOKMARKER'].includes(String(host.agentName).toUpperCase()))return {status:'error',error:'Only the main research agent can request an external send.'};
   signal?.throwIfAborted();const context=await this.context(host.frameId);this.policy.assertWritable(context);
@@ -189,8 +258,26 @@ export class ConfidentialityManager {
   const frameId=this.scope.currentFrame()??details?.frameId??owner?.frameId??owner?.frame_id??owner?.rootFrameId??owner?.root_frame_id;
   if(!frameId){if(this.policy.snapshot().sessions.some(s=>s.mode==='class2'))throw new SessionPolicyError('missing_native_scope','This tool has no verified chat scope and was blocked.');return}
   const context=await this.context(frameId);if(kind==='host-call')this.deps.nativeBoundary?.assertHostContext(owner);this.deps.nativeBoundary?.noteExecution(kind,context);if(this.policy.policy(context).mode!=='class2')return;
-  if(kind==='tool'&&details?.tool?.name==='request_external_access'&&!details?.flattenedMcp)return;
-  const lane:PolicyLane=kind==='kernel'||kind==='process'?'local-compute':kind==='network-grant'?'uncontrolled-network':kind==='host-call'?'mcp':'uncontrolled-network';
+  const phase=details?.phase,toolName=details?.tool?.name;
+  // The upstream dispatcher can mark a first-party tool as flattened when it
+  // also exposes it through its internal dispatch map.  Only its own native
+  // tool list can attest that this is not an MCP-provided name.
+  const directTool=phase==='registry'?details?.flattenedMcp===undefined:details?.nativeTool===true||details?.flattenedMcp===false;
+  const knownToolPhase=['dispatch','compute','registry'].includes(phase);
+  if(kind==='tool'&&toolName==='request_external_access'&&directTool&&knownToolPhase)return;
+  const offlinePython=kind==='tool'&&['python','repl'].includes(toolName)&&directTool&&knownToolPhase;
+  // The native Python executor enters the sandbox through its subprocess
+  // wrapper after dispatch. This is the same verified local path, not an
+  // arbitrary shell or MCP launch. The returned overrides make the wrapper
+  // deny networking and withhold frame secrets before it starts the process.
+  const offlinePythonSandbox=kind==='sandbox-process'&&details?.method==='wrapSubprocessArgs'&&String(details?.environment??'').trim().toLowerCase()==='python';
+  // macOS runs an existing conda environment through wrapCondaCommand. A
+  // request that creates or rewrites a conda target stays blocked. The
+  // accepted path is still tested with a direct socket attempt below.
+  const offlineCondaRun=kind==='sandbox-provisioning'&&details?.method==='wrapCondaCommand'&&Array.isArray(details?.args)&&details.args[1]?.condaWriteTarget===undefined;
+  const localArtifact=kind==='tool'&&protectedLocalArtifactTools.has(toolName)&&directTool&&['dispatch','compute','registry'].includes(phase);
+  if(localArtifact)assertProtectedLocalArtifactInput(toolName,details?.tool?.input);
+  const lane:PolicyLane=kind==='kernel'||kind==='process'||offlinePython||offlinePythonSandbox||offlineCondaRun?'local-compute':localArtifact?'local-files':kind==='network-grant'?'uncontrolled-network':kind==='host-call'?'mcp':'uncontrolled-network';
   this.policy.assertLane(context,lane);
   if(lane==='local-compute')return {...this.deps.offlineExecution!.overrides};
  }

@@ -42,6 +42,10 @@ export function nativeExecutionPolicyEdits(ast:t.Node,source:string):NativeExecu
   });return found;
  };
  const guard=(kind:NativeExecutionKind,owner:string,details:string)=>`globalThis.__scienceLocal.guardNativeExecution(${JSON.stringify(kind)},${owner},${details})`;
+ // These names are the upstream first-party local tools.  They remain native
+ // even when the runtime also advertises a same-named internal dispatch entry.
+ // This classification never applies to arbitrary MCP names.
+ const protectedNative=(name:string)=>`dEn.has(${name})||nNo.has(${name})||${JSON.stringify(['python','repl','save_artifacts','read_file'])}.includes(${name})`;
  const wrappers=new Map<string,NativeExecutionKind>([
   ['wrapCommand','sandbox-shell'],['wrapSubprocessArgs','sandbox-process'],
   ['wrapCondaCommand','sandbox-provisioning'],['wrapCondaSubprocessArgs','sandbox-provisioning'],
@@ -60,16 +64,19 @@ export function nativeExecutionPolicyEdits(ast:t.Node,source:string):NativeExecu
     if(!node.async||args.length!==1||calls(node.body,'validateNetworkTarget').length!==1||!body.includes('alreadyAllowed'))invalid('network-grant');
     insert(node.body,'native-policy-network-grant',`await ${guard('network-grant','this',`{request:${args[0]}}`)};`);
    }else if(name==='_executeToolCallsInner'){
-    if(!node.async||args.length!==2||!body.includes('this._flattenedMcpDispatch')||!body.includes('this._executeComputeTool('))invalid('tool-dispatch');
+    if(!node.async||args.length!==2||!body.includes('this._flattenedMcpDispatch')||!body.includes('this._executeComputeTool(')||!body.includes('dEn.has(')||!body.includes('nNo.has('))invalid('tool-dispatch');
     const loops:t.ForOfStatement[]=[];t.traverseFast(node.body,value=>{if(t.isForOfStatement(value)&&t.isIdentifier(value.right,{name:args[0]}))loops.push(value)});
     const loop=loops[0],binding=loop&&t.isVariableDeclaration(loop.left)&&loop.left.declarations.length===1?loop.left.declarations[0].id:undefined;
     if(loops.length!==1||!t.isIdentifier(binding)||!t.isBlockStatement(loop.body))invalid('tool-dispatch');
     const call=(binding as t.Identifier).name;
-    insert(loop.body as t.BlockStatement,'native-policy-tool-dispatch',`try{await ${guard('tool','this',`{tool:${call},flattenedMcp:this._flattenedMcpDispatch.has(${call}.name),phase:"dispatch"}`)}}catch(__chimericNativeExecutionError){await this._appendToolResult(${args[1]},${call}.id,JSON.stringify({error:__chimericNativeExecutionError instanceof Error?__chimericNativeExecutionError.message:String(__chimericNativeExecutionError)}),{isError:true,provenance:"direct"});continue;}`);
+    // The native router classifies its own compute tools before calling this
+    // loop.  A name supplied only by a flattened MCP server is absent from
+    // both sets, even when an MCP name collides with a built-in name.
+    insert(loop.body as t.BlockStatement,'native-policy-tool-dispatch',`try{await ${guard('tool','this',`{tool:${call},flattenedMcp:this._flattenedMcpDispatch.has(${call}.name),nativeTool:${protectedNative(call+'.name')},phase:"dispatch"}`)}}catch(__chimericNativeExecutionError){await this._appendToolResult(${args[1]},${call}.id,JSON.stringify({error:__chimericNativeExecutionError instanceof Error?__chimericNativeExecutionError.message:String(__chimericNativeExecutionError)}),{isError:true,provenance:"direct"});continue;}`);
    }else if(name==='_executeComputeTool'){
     const first=node.body.body[0];
     if(!node.async||args.length!==3||!t.isTryStatement(first)||!body.includes('this._flattenedMcpDispatch.get(')||!body.includes('compute_provider'))invalid('compute-dispatch');
-    insert((first as t.TryStatement).block,'native-policy-compute-dispatch',`await ${guard('tool','this',`{tool:${args[0]},flattenedMcp:this._flattenedMcpDispatch.has(${args[0]}.name),phase:"compute"}`)};`);
+    insert((first as t.TryStatement).block,'native-policy-compute-dispatch',`await ${guard('tool','this',`{tool:${args[0]},flattenedMcp:this._flattenedMcpDispatch.has(${args[0]}.name),nativeTool:${protectedNative(args[0]+'.name')},phase:"compute"}`)};`);
    }else if(name==='invokeTool'&&body.includes('this._executeLocalTool(')){
     const blocks=node.body.body.filter(value=>t.isTryStatement(value));
     if(!node.async||args.length!==16||blocks.length!==1||calls(node.body,'_executeLocalTool').length!==1)invalid('registry-tool');

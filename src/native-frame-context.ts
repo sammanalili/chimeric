@@ -6,7 +6,8 @@ import type {FrameIdentity} from './session-policy';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/;
 const validId=(value:unknown):value is string=>typeof value==='string'&&ID.test(value);
 const nullableId=(value:unknown)=>value===null||validId(value);
-type NativeFrame={id:string;parent_frame_id:string|null;root_frame_id:string|null;project_id:string|null};
+type NativeFrame={id:string;parent_frame_id:string|null;root_frame_id:string|null;project_id:string|null;created_at:number|null};
+export type NativeFrameIdentity=FrameIdentity&{rootCreatedAt?:number};
 
 function contained(root:string,path:string){const value=relative(root,path);return value!==''&&!value.startsWith('..')&&!isAbsolute(value)}
 function plainDirectory(path:string){const info=lstatSync(path);return info.isDirectory()&&!info.isSymbolicLink()}
@@ -23,16 +24,17 @@ function inspectSchema(db:Database){
  if(!frames||!projects||!['id','parent_frame_id','root_frame_id','project_id'].every(name=>frames.has(name))||!projects.has('user_id'))return undefined;
  const keys=db.query('PRAGMA foreign_key_list("frames")').all() as Array<{table:string;from:string;to:string}>;
  for(const [column,table] of [['project_id','projects'],['parent_frame_id','frames'],['root_frame_id','frames']])if(!keys.some(key=>key.from===column&&key.table===table&&key.to==='id'))return undefined;
- return {archived:projects.has('archived_at')};
+ return {archived:projects.has('archived_at'),created:frames.has('created_at')};
 }
-function resolveInDatabase(db:Database,frameId:string,organizationId:string):FrameIdentity|undefined{
+function resolveInDatabase(db:Database,frameId:string,organizationId:string):NativeFrameIdentity|undefined{
  const schema=inspectSchema(db);if(!schema)throw Error('unsupported-frame-schema');
  // Query only identity/ancestry metadata. Payload, context, prompts, transcripts,
  // model instructions and credential tables are never selected.
- const selectFrame=db.query('SELECT id, parent_frame_id, root_frame_id, project_id FROM frames WHERE id = ? LIMIT 2');
+ const selectFrame=db.query('SELECT id, parent_frame_id, root_frame_id, project_id, '+(schema.created?'created_at':'NULL')+' AS created_at FROM frames WHERE id = ? LIMIT 2');
  const read=(id:string):NativeFrame|undefined=>{
   const rows=selectFrame.all(id) as NativeFrame[];if(rows.length===0)return undefined;if(rows.length!==1)throw Error('ambiguous-frame');
-  const row=rows[0];if(row.id!==id||!nullableId(row.parent_frame_id)||!nullableId(row.root_frame_id)||!nullableId(row.project_id))throw Error('invalid-frame-identity');return row;
+  const row=rows[0];if(row.id!==id||!nullableId(row.parent_frame_id)||!nullableId(row.root_frame_id)||!nullableId(row.project_id))throw Error('invalid-frame-identity');
+  if(row.created_at!==null&&(!Number.isSafeInteger(row.created_at)||row.created_at<0))throw Error('invalid-frame-created-at');return row;
  };
  const frame=read(frameId);if(!frame)return undefined;
  const ancestry:NativeFrame[]=[],seen=new Set<string>();let current:NativeFrame|undefined=frame;
@@ -51,7 +53,8 @@ function resolveInDatabase(db:Database,frameId:string,organizationId:string):Fra
  const projects=db.query(query).all(root.project_id) as Array<{id:string;user_id:string|null;archived_at?:number|null}>;
  if(projects.length!==1||projects[0].id!==root.project_id||!validId(projects[0].user_id)||schema.archived&&projects[0].archived_at!==null)throw Error('unowned-or-unavailable-project');
  return {frameId:frame.id,rootFrameId:frame.id===root.id?root.root_frame_id:root.id,parentFrameId:frame.parent_frame_id,
-  projectId:root.project_id,ownerId:projects[0].user_id,organizationId};
+  projectId:root.project_id,ownerId:projects[0].user_id,organizationId,
+  ...(root.created_at===null?{}:{rootCreatedAt:root.created_at})};
 }
 
 /**
@@ -63,14 +66,14 @@ function resolveInDatabase(db:Database,frameId:string,organizationId:string):Fra
  * changes. Ambiguous, unsafe or unsupported stores return no identity without
  * exposing database errors or identity values. No readOnly role is invented.
  */
-export function lookupFrame(profileDir:string,frameId:string):FrameIdentity|undefined{
+export function lookupFrame(profileDir:string,frameId:string):NativeFrameIdentity|undefined{
  if(!validId(frameId))return undefined;
  try{
   if(!plainDirectory(profileDir))return undefined;
   const profile=realpathSync(profileDir),orgs=join(profile,'orgs');if(!plainDirectory(orgs))return undefined;
   const entries=readdirSync(orgs,{withFileTypes:true}).filter(entry=>!entry.name.startsWith('.'));
   if(entries.length>256)return undefined;
-  let identity:FrameIdentity|undefined;
+  let identity:NativeFrameIdentity|undefined;
   for(const entry of entries){
    if(!validId(entry.name))return undefined;
    const directory=join(orgs,entry.name);if(!plainDirectory(directory)||!contained(profile,realpathSync(directory)))return undefined;

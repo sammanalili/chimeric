@@ -5,7 +5,7 @@ import type {ResourcePolicyDependencies} from '../src/resource-policy';
 import {artifactFixture} from './helpers/native-artifact-fixture';
 const cleanups:Array<()=>void>=[];afterEach(()=>{for(const done of cleanups.splice(0).reverse())done()});
 const unavailableFrame=():never=>{throw new SessionPolicyError('frame_unavailable','The research session is unavailable.',404)};
-function fixture(overrides:Partial<ResourcePolicyDependencies>={},protectionEnabled=()=>false){const f=artifactFixture();cleanups.push(f.cleanup);let frame:string|undefined;const policy=f.store({legacyRule:'ordinary-while-disabled',protectionEnabled,...overrides}),service=new NativeResourceService(policy,{currentFrame:()=>frame,protectionEnabled,ownerUserId:'owner-a'});cleanups.push(()=>service.close());return {f,policy,service,setFrame:(value?:string)=>frame=value}}
+function fixture(overrides:Partial<ResourcePolicyDependencies>={},protectionEnabled=()=>false,withProtectedWrite?:<T>(frameId:string,kind:'artifact'|'upload',operation:()=>Promise<T>)=>Promise<T>){const f=artifactFixture();cleanups.push(f.cleanup);let frame:string|undefined;const policy=f.store({legacyRule:'ordinary-while-disabled',protectionEnabled,...overrides}),service=new NativeResourceService(policy,{currentFrame:()=>frame,protectionEnabled,ownerUserId:'owner-a',withProtectedWrite});cleanups.push(()=>service.close());return {f,policy,service,setFrame:(value?:string)=>frame=value}}
 
 test('Explicit feature-off compatibility preserves an ordinary legacy metadata read without classifying it',async()=>{
  const {f,policy,service}=fixture(),v=f.add('legacy');let reads=0;
@@ -16,6 +16,11 @@ test('Protected version blocks an ordinary sibling before native metadata or byt
  const {f,policy,service,setFrame}=fixture(),v=f.add('secret',{root:'protected'});await policy.recordCreated(await policy.captureFrame('protected'),{versionId:v.versionId});setFrame('ordinary');let reads=0;
  await expect(service.metadata({}, {method:'get_version_metadata_lite',args:[v.versionId]},async()=>{reads++;return {}})).rejects.toThrow('not approved');
  await expect(service.materialize({}, {method:'_readVersionContent',args:[{id:v.versionId}]},async()=>{reads++;return v.bytes})).rejects.toThrow('not approved');expect(reads).toBe(0);
+});
+test('Protected materialization carries the durable storage root into the physical read boundary',async()=>{
+ let seen:any;const f=artifactFixture();cleanups.push(f.cleanup);const policy=f.store(),v=f.add('protected-read',{root:'protected'});await policy.recordCreated(await policy.captureFrame('protected'),{versionId:v.versionId});
+ const service=new NativeResourceService(policy,{currentFrame:()=> 'protected',protectionEnabled:()=>true,ownerUserId:'owner-a',withProtectedRead:async(resource,evidence,operation)=>{seen={resource,evidence};return await operation()}});cleanups.push(()=>service.close());
+ expect(await service.materialize({}, {method:'_readVersionContent',args:[{id:v.versionId}]},async()=>v.bytes)).toEqual(v.bytes);expect(seen.resource.versionId).toBe(v.versionId);expect(seen.evidence.storageRootFrameIds).toEqual(['protected']);
 });
 test('Consumer scope filters project uploads before mapping their names or metadata',async()=>{
  const {f,policy,service}=fixture(),secret=f.add('secret-upload',{root:'uploads',creating:null,producing:null,upload:true}),ordinary=f.add('ordinary-upload',{root:'uploads',creating:null,producing:null,upload:true});
@@ -28,6 +33,11 @@ test('Save captures the trusted context before commit and classifies the exact r
  const {f,policy,service}=fixture(),v=f.add('new-version');let writes=0;
  const result=await service.save({}, {frame_id:'ordinary'},async()=>{writes++;return {artifact_id:v.artifactId,version_id:v.versionId}});
  expect(result).toEqual({artifact_id:v.artifactId,version_id:v.versionId});expect(writes).toBe(1);expect(policy.snapshot().resources[0]).toMatchObject({artifactId:v.artifactId,versionId:v.versionId,dataClass:'standard'});
+});
+test('Protected staging does not finish until exact classification has committed',async()=>{
+ let policy:any,classifiedInside=false,entered='';const setup=fixture({},()=>false,async(frameId,kind,operation)=>{entered=`${frameId}:${kind}`;const value=await operation();classifiedInside=policy.snapshot().resources.some((row:any)=>row.versionId==='classified-version');return value});policy=setup.policy;
+ const v=setup.f.add('classified-version');await setup.service.save({}, {frame_id:'ordinary',project_id:'project-a'},async()=>({artifact_id:v.artifactId,version_id:v.versionId}));
+ expect(entered).toBe('ordinary:artifact');expect(classifiedInside).toBe(true);
 });
 test('An ordinary bundled seed may save before its frame row exists, but only for the exact unavailable-frame error',async()=>{
  let resolve:(frameId:string)=>any;
@@ -62,6 +72,11 @@ test('Upload request authenticates owner and captures a supplied composer frame 
  const {service}=fixture();let ran=0;
  await expect(service.withUploadRequest({getUser:()=>({user_id:'other'})},{query:{frameId:'ordinary'}},async()=>ran++)).rejects.toThrow('owner');
  const value=await service.withUploadRequest({getUser:()=>({user_id:'owner-a'})},{query:{frameId:'ordinary'}},async()=>{ran++;return 'ok'});expect(value).toBe('ok');expect(ran).toBe(1);
+});
+test('Upload storage uses the authenticated composer frame instead of the shared uploads root',async()=>{
+ const routed:string[]=[];const {f,service}=fixture({},()=>false,async(frameId,kind,operation)=>{routed.push(`${frameId}:${kind}`);return await operation()}),v=f.add('scoped-upload',{root:'ordinary',upload:true});
+ await service.withUploadRequest({getUser:()=>({user_id:'owner-a'})},{query:{frameId:'ordinary'}},()=>service.saveUpload({}, {root_frame_id:'uploads',project_id:'project-a'},async()=>({artifact_id:v.artifactId,version_id:v.versionId})));
+ expect(routed).toEqual(['ordinary:upload']);
 });
 test('First protected history closes every ambiguous compatibility path',async()=>{
  const {f,policy,service}=fixture(),v=f.add('secret',{root:'protected'});await policy.recordCreated(await policy.captureFrame('protected'),{versionId:v.versionId});let calls=0;

@@ -55,5 +55,6 @@ test('credential changes abort an already authorized protected request and fail 
 });
 test('standalone image-generation tools and all unverified native paths remain blocked for protected frames',async()=>{
  const f=fixture();await f.enable();for(const name of ['generate_image','external_mcp','python','shell'])await expect(f.manager.guardNativeExecution('tool',f.host,{tool:{name},flattenedMcp:false})).rejects.toThrow('not yet verified');
- await expect(f.manager.guardNativeExecution('tool',f.host,{tool:{name:'request_external_access'},flattenedMcp:false})).resolves.toBeUndefined();await expect(f.manager.guardNativeExecution('tool',f.host,{tool:{name:'request_external_access'},flattenedMcp:true})).rejects.toThrow('not yet verified');expect(f.wires).toHaveLength(0);
+ await expect(f.manager.guardNativeExecution('tool',f.host,{tool:{name:'request_external_access'},flattenedMcp:false,phase:'dispatch'})).resolves.toBeUndefined();
+ for(const details of [{tool:{name:'request_external_access'},flattenedMcp:true,phase:'dispatch'},{tool:{name:'request_external_access'},flattenedMcp:false},{tool:{name:'request_external_access'},phase:'registry',flattenedMcp:false}])await expect(f.manager.guardNativeExecution('tool',f.host,details)).rejects.toThrow('not yet verified');expect(f.wires).toHaveLength(0);
 });

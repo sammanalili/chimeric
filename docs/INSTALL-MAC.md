@@ -10,7 +10,9 @@ The packaged app has been exercised on macOS arm64 with the provider bridge, Cha
 - macOS with permission to copy an application into `/Applications`.
 - A separate compatible Chimeric runtime binary is required for a source build. The source repository does not contain recovered vendor binaries.
 
-## Install a packaged app
+## Install a packaged app without Xcode
+
+The packaged app does not require Xcode, Homebrew, Bun, or a source build on the Mac that runs it. Xcode Command Line Tools are required only when building a new app from source.
 
 1. Obtain the private-preview `Chimeric.app` package from the person who supplied it. Verify the build and runtime revision supplied with the package.
 2. Copy `Chimeric.app` to `/Applications`. Keep the application bundle intact; do not move its `Contents/Resources` files into a separate system directory.

@@ -1,5 +1,6 @@
 import {expect,test} from 'bun:test';
 import {EventEmitter} from 'node:events';
+import {createHash} from 'node:crypto';
 import {createOutboundTransport,isPublicOutboundAddress} from '../src/outbound-transport';
 import type {BrokerWireRequest} from '../src/outbound-broker';
 
@@ -7,8 +8,8 @@ const publicV4={address:'8.8.8.8',family:4},publicV6={address:'2606:4700:4700::1
 function wire(overrides:Partial<BrokerWireRequest>={}):BrokerWireRequest{
  const controller=new AbortController();return {url:'https://public.example/api/search?query=synthetic',method:'POST',headers:Object.freeze({accept:'application/json','content-type':'application/json'}),bodyBase64:Buffer.from('{"query":"Synthetic public information"}').toString('base64'),binding:Object.freeze({id:'public-search',endpoint:'https://public.example/api',api:'reviewed-http',revision:'one',credentialRevision:'keyless'}),signal:controller.signal,redirect:'error',assertCurrent:()=>controller.signal.throwIfAborted(),...overrides};
 }
-function fixture(options:{addresses?:Array<{address:string;family:number}>;lookup?:(host:string,options:any)=>Promise<any>;onConstruct?:()=>void;onEnd?:(fixture:any)=>void;status?:number;headers?:Record<string,string|string[]>;chunks?:Buffer[]}={}){
- const lookups:any[]=[],requests:any[]=[],responses:any[]=[];
+function fixture(options:{addresses?:Array<{address:string;family:number}>;lookup?:(host:string,options:any)=>Promise<any>;onConstruct?:()=>void;onEnd?:(fixture:any)=>void;status?:number;headers?:Record<string,string|string[]>;chunks?:Buffer[];credential?:(binding:BrokerWireRequest['binding'])=>string|undefined}={}){
+ const lookups:any[]=[],requests:any[]=[],responses:any[]=[],credentials:any[]=[];
  const dns=async(host:string,lookupOptions:any)=>{lookups.push({host,options:lookupOptions});return options.lookup?options.lookup(host,lookupOptions):options.addresses??[publicV6,publicV4]};
  const request=(url:URL,requestOptions:any,callback:Function)=>{
   const raw:any=new EventEmitter(),response:any=Object.assign(new EventEmitter(),{headers:options.headers??{'content-type':'application/json'},statusCode:options.status??200,destroyed:false,destroy(error:Error){if(this.destroyed)return;this.destroyed=true;queueMicrotask(()=>this.emit('error',error))}});
@@ -21,7 +22,8 @@ function fixture(options:{addresses?:Array<{address:string;family:number}>;looku
   });return raw};
   requests.push(entry);responses.push(response);options.onConstruct?.();return raw;
  };
- const transport=createOutboundTransport({lookup:dns as any,request:request as any});return {transport,lookups,requests,responses};
+ const credential=(binding:BrokerWireRequest['binding'])=>{credentials.push(binding);return options.credential?.(binding)};
+ const transport=createOutboundTransport({lookup:dns as any,request:request as any,credential});return {transport,lookups,requests,responses,credentials};
 }
 
 test('one HTTPS request preserves exact reviewed body and headers, without cookies, auth, proxy, agent reuse or retries',async()=>{
@@ -55,6 +57,34 @@ test('transport accepts only the reviewed public keyless HTTPS adapter and same 
  const good=wire();for(const input of [wire({url:'http://public.example/api'}),wire({url:'https://evil.example/api'}),wire({url:'https://user:synthetic@public.example/api'}),wire({binding:{...good.binding,api:'openai-completions'}}),wire({binding:{...good.binding,credentialRevision:'a'.repeat(64)}})]){
   const f=fixture();await expect(f.transport(input)).rejects.toMatchObject({code:'unsupported_destination'});expect(f.lookups).toHaveLength(0);expect(f.requests).toHaveLength(0);
  }
+});
+test('configured OpenAI and Anthropic credentials are resolved after DNS and attached only to the consumed request',async()=>{
+ const secret='synthetic-secret-never-in-review',revision=createHash('sha256').update(secret).digest('hex'),good=wire();
+ for(const [api,header] of [['openai-completions','authorization'],['openai-responses','authorization'],['anthropic-messages','x-api-key']] as const){
+  let f:any;f=fixture({credential:binding=>{expect(f.lookups).toHaveLength(1);expect(f.requests).toHaveLength(0);expect(binding.credentialRevision).toBe(revision);return secret}});
+  const hostname=api==='anthropic-messages'?'api.anthropic.com':'public.example',endpoint='https://'+hostname+'/api';
+  const input=wire({url:endpoint+'/search?query=synthetic',binding:Object.freeze({...good.binding,endpoint,api,credentialRevision:revision})});await f.transport(input);
+  expect(f.credentials).toHaveLength(1);expect(f.requests).toHaveLength(1);
+  expect(f.requests[0].options.headers[header]).toBe(api==='anthropic-messages'?secret:'Bearer '+secret);
+  expect(JSON.stringify(input)).not.toContain(secret);
+  expect(Object.keys(f.requests[0].options.headers).filter(name=>/^(authorization|x-api-key)$/i.test(name))).toEqual([header]);
+ }
+});
+test('missing or changed configured credentials fail before request construction and are never retried',async()=>{
+ const expected='expected-secret',revision=createHash('sha256').update(expected).digest('hex'),good=wire(),binding=Object.freeze({...good.binding,api:'openai-responses',credentialRevision:revision});
+ for(const credential of [undefined,()=>undefined,()=>'',()=> 'changed-secret']){
+  const f=fixture({credential});await expect(f.transport(wire({binding}))).rejects.toMatchObject({code:'credential_changed',status:409});expect(f.lookups).toHaveLength(1);expect(f.requests).toHaveLength(0);expect(f.credentials).toHaveLength(1);
+ }
+ const privateDns=fixture({addresses:[{address:'127.0.0.1',family:4}],credential:()=>expected});await expect(privateDns.transport(wire({binding}))).rejects.toMatchObject({code:'private_destination'});expect(privateDns.credentials).toHaveLength(0);expect(privateDns.requests).toHaveLength(0);
+});
+test('the Anthropic exception is exact and all other vendor product or telemetry hosts remain blocked',async()=>{
+ const secret='synthetic-anthropic-key',revision=createHash('sha256').update(secret).digest('hex'),good=wire(),credential=()=>secret;
+ const allowed=fixture({credential});await allowed.transport(wire({url:'https://api.anthropic.com/v1/messages',binding:Object.freeze({...good.binding,endpoint:'https://api.anthropic.com',api:'anthropic-messages',credentialRevision:revision})}));expect(allowed.requests).toHaveLength(1);
+ for(const hostname of ['claude.ai','claude.com','console.anthropic.com']){
+  const f=fixture({credential});const endpoint='https://'+hostname;
+  await expect(f.transport(wire({url:endpoint+'/v1/messages',binding:Object.freeze({...good.binding,endpoint,api:'anthropic-messages',credentialRevision:revision})}))).rejects.toMatchObject({code:'unsupported_destination'});expect(f.lookups).toHaveLength(0);expect(f.credentials).toHaveLength(0);expect(f.requests).toHaveLength(0);
+ }
+ for(const api of ['reviewed-http','openai-responses'] as const){const f=fixture({credential});await expect(f.transport(wire({url:'https://api.anthropic.com/v1/messages',binding:Object.freeze({...good.binding,endpoint:'https://api.anthropic.com',api,credentialRevision:api==='reviewed-http'?'keyless':revision})}))).rejects.toMatchObject({code:'unsupported_destination'});expect(f.lookups).toHaveLength(0);expect(f.credentials).toHaveLength(0)}
 });
 test('policy changes before DNS, after DNS and after request construction all stop before request bytes are written',async()=>{
  let valid=false;const current=()=>{if(!valid)throw Error('Synthetic policy revoked')},before=fixture();await expect(before.transport(wire({assertCurrent:current}))).rejects.toThrow('policy revoked');expect(before.lookups).toHaveLength(0);

@@ -79,6 +79,7 @@ function ExactPayload({payload}){
 }
 function ReviewContent({review}){return jsx.jsxs(React.Fragment,{children:[
  jsx.jsx(Field,{label:'Why this request is needed',children:jsx.jsx(ExactText,{value:review.rationale})}),
+ jsx.jsx(Field,{label:'Configured connection',children:jsx.jsx(ExactText,{value:review.connection.id+' · '+review.connection.api+'\n'+review.connection.endpoint})}),
  jsx.jsx(Field,{label:'Exact destination',children:jsx.jsx(ExactText,{value:review.request.method+' '+review.destination.url})}),
  jsx.jsx('p',{className:muted,children:t(review.destination.encrypted?'The connection uses HTTPS.':'The connection is not encrypted with HTTPS.')}),
  jsx.jsx(Field,{label:'Local transformation',children:jsx.jsxs(React.Fragment,{children:[jsx.jsx(ExactText,{value:t(review.privacy.kind)+': '+review.privacy.summary}),jsx.jsx(ExactText,{value:review.privacy.limitations?.join('\n')}),jsx.jsx('p',{children:t(review.privacy.notice)})]})}),

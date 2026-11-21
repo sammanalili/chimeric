@@ -4,6 +4,7 @@ import {parse} from '@babel/parser';
 import traverse0 from '@babel/traverse';
 import {nativeVoiceFrontendEdits} from './native-voice-context.ts';
 import {nativeBrowserPolicyEdits} from './native-browser-policy.ts';
+import {nativeUploadContextEdits} from './native-upload-context.ts';
 import {brandFrontendUserText} from './product-branding.ts';
 const traverse=traverse0.default??traverse0;
 const input=JSON.parse(readFileSync(0,'utf8'));
@@ -51,11 +52,12 @@ function helpURL(value,name=''){
   if(!/docs|support|legal|privacy|claude-science|changelog|product/.test(value))return value;
   return '/api/local/help'+(/update|changelog/.test(value)?'#updates':/privacy|legal|your-data/.test(value)?'#privacy':/permission/.test(value)?'#permissions':/file|upload/.test(value)?'#files':'');
 }
-const output=[];const inventory=[],browserPolicyFiles=new Set(),expectedBrowserPolicyFiles=new Set(['ArtifactTile-CFbnK3VR.js','RightPaneTabContent-CNO7IanA.js','HtmlPreview-CXBwtfOG.js','index-BgpYmw3d.js','HostMcpAppTile-DsGRshgh.js','McpAppTile-Bud9Ahpu.js']);
+const output=[];const inventory=[],browserPolicyFiles=new Set(),uploadContextFiles=new Set(),expectedBrowserPolicyFiles=new Set(['ArtifactTile-CFbnK3VR.js','RightPaneTabContent-CNO7IanA.js','HtmlPreview-CXBwtfOG.js','index-BgpYmw3d.js','HostMcpAppTile-DsGRshgh.js','McpAppTile-Bud9Ahpu.js']),expectedUploadContextFiles=new Set(['index-BgpYmw3d.js','useSessionActions-B0Qf6PUm.js']);
 for(const file of input){
-  const {name,text:sourceText}=file,sourceAst=parse(sourceText,{sourceType:'unambiguous'}),browserEdits=nativeBrowserPolicyEdits(sourceAst,sourceText,name);
+  const {name,text:sourceText}=file,sourceAst=parse(sourceText,{sourceType:'unambiguous'}),browserEdits=nativeBrowserPolicyEdits(sourceAst,sourceText,name),uploadEdits=nativeUploadContextEdits(sourceAst,sourceText,name);
   if(browserEdits.length)browserPolicyFiles.add(name.split('/').at(-1));browserEdits.sort((a,b)=>b.start-a.start);for(let i=1;i<browserEdits.length;i++)if(browserEdits[i].end>browserEdits[i-1].start)throw Error('Overlapping native browser edits in '+name);
-  let text=sourceText;for(const edit of browserEdits)text=text.slice(0,edit.start)+edit.text+text.slice(edit.end);
+  if(uploadEdits.length)uploadContextFiles.add(name.split('/').at(-1));const nativeEdits=[...browserEdits,...uploadEdits].sort((a,b)=>b.start-a.start);for(let i=1;i<nativeEdits.length;i++)if(nativeEdits[i].end>nativeEdits[i-1].start)throw Error('Overlapping native policy edits in '+name);
+  let text=sourceText;for(const edit of nativeEdits)text=text.slice(0,edit.start)+edit.text+text.slice(edit.end);
   const ast=parse(text,{sourceType:'unambiguous'}),edits=[],usageAnchors=new Set();
   let atoms=0,logos=0,events=0,staticAtoms=0,generalLanguage=0,localLogins=0,imageChoices=0,voiceFallbacks=0,voiceLabels=0,confidentialityParams=0,confidentialityBindings=0,outboundReviews=0;
   traverse(ast,{
@@ -211,7 +213,8 @@ for(const file of input){
   if(name.endsWith('/ControlPanelModal-OAuv-kWB.js'))result='import{LanguageSettings as LocalChimericLanguageSettings}from"/api/local/providers/component.js";'+result;
   // Parse the final module as well; a successful string substitution is insufficient.
   if(edits.length)parse(result,{sourceType:'unambiguous'});
-  output.push({name,text:result,edits:edits.length+browserEdits.length});
+  output.push({name,text:result,edits:edits.length+nativeEdits.length});
 }
 if(process.env.CHIMERIC_FRONTEND_COMPLETE==='1'&&(browserPolicyFiles.size!==expectedBrowserPolicyFiles.size||[...expectedBrowserPolicyFiles].some(name=>!browserPolicyFiles.has(name))))throw Error('Missing native browser policy assets: '+JSON.stringify([...browserPolicyFiles]));
+if(process.env.CHIMERIC_FRONTEND_COMPLETE==='1'&&(uploadContextFiles.size!==expectedUploadContextFiles.size||[...expectedUploadContextFiles].some(name=>!uploadContextFiles.has(name))))throw Error('Missing native upload context assets: '+JSON.stringify([...uploadContextFiles]));
 process.stdout.write(JSON.stringify({files:output,inventory}));

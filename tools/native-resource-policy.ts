@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import * as t from '@babel/types';
 import {nativeRevision} from './native-revisions';
+import {nativeProtectedResourceBody} from './native-protected-storage';
 
 export type NativeResourceEdit={start:number;end:number;text:string;label:string};
 /** These are server callbacks, not browser-provided permissions. The adapter
@@ -40,6 +41,7 @@ const lists=new Set(['list_artifacts_for_project','list_artifacts_for_conversati
 export const nativeResourcePolicyBoundaries=Object.freeze([
  ...[...metadata].map(n=>'native-resource-metadata-'+n),...[...materializers].map(n=>'native-resource-materialize-'+n),...[...lists].map(n=>'native-resource-filter-'+n),
  'native-resource-save-_saveArtifactCommon','native-resource-save-save_user_upload_streaming','native-resource-automatic-attachments','native-resource-conversation-predicate','native-resource-http-read','native-resource-upload-request',
+ 'native-resource-upload-init','native-resource-upload-chunk','native-resource-upload-finalize','native-resource-upload-cancel',
 ]);
 
 /** Guard actual native store/materialization and browser upload/auto-attachment
@@ -52,10 +54,10 @@ export function nativeResourcePolicyEdits(ast:t.Node,source:string):NativeResour
  if(source.includes(prefix))bad('already-patched');
  const text=(node:t.Node)=>{if(node.start==null||node.end==null)bad('range');return source.slice(node.start!,node.end!)};
  const add=(node:t.Node,label:string,value:string)=>{seen.set(label,(seen.get(label)??0)+1);edits.push({start:node.start!,end:node.end!,label,text:value})};
- const wrap=(node:t.ClassMethod|t.ArrowFunctionExpression,label:string,call:string)=>{
+ const wrap=(node:t.ClassMethod|t.ArrowFunctionExpression,label:string,call:string,inner?:string)=>{
   if(!t.isBlockStatement(node.body)||!node.async)bad(label);
   const body=node.body as t.BlockStatement;
-  add(body,label,`{return await ${call}async()=>${text(body)})}`);
+  add(body,label,`{return await ${call}async()=>${inner??text(body)})}`);
  };
  const storeClasses:Array<t.ClassDeclaration|t.ClassExpression>=[];
  t.traverseFast(ast,node=>{if((t.isClassDeclaration(node)||t.isClassExpression(node))&&['_readVersionContent','_saveArtifactCommon','save_user_upload_streaming'].every(name=>node.body.body.some(m=>t.isClassMethod(m)&&t.isIdentifier(m.key,{name}))))storeClasses.push(node)});
@@ -64,11 +66,11 @@ export function nativeResourcePolicyEdits(ast:t.Node,source:string):NativeResour
  for(const node of store.body.body){
   if(!t.isClassMethod(node)||!t.isIdentifier(node.key))continue;const name=node.key.name;
   if(metadata.has(name))wrap(node,'native-resource-metadata-'+name,`${prefix}.metadata(this,{method:${JSON.stringify(name)},args:Array.from(arguments)},`);
-  else if(materializers.has(name))wrap(node,'native-resource-materialize-'+name,`${prefix}.materialize(this,{method:${JSON.stringify(name)},args:Array.from(arguments)},`);
+  else if(materializers.has(name))wrap(node,'native-resource-materialize-'+name,`${prefix}.materialize(this,{method:${JSON.stringify(name)},args:Array.from(arguments)},`,nativeProtectedResourceBody(node,source,name));
   else if(lists.has(name)){
    if(!node.async)bad(name);const body=text(node.body);add(node.body,'native-resource-filter-'+name,`{const __chimericResourceRows=await(async()=>${body})();return await ${prefix}.filter(this,{method:${JSON.stringify(name)},args:Array.from(arguments)},__chimericResourceRows)}`);
   }else if(name==='_saveArtifactCommon'||name==='save_user_upload_streaming'){
-   if(node.params.length!==1||!t.isIdentifier(node.params[0]))bad(name);wrap(node,'native-resource-save-'+name,`${prefix}.${name==='_saveArtifactCommon'?'save':'saveUpload'}(this,${node.params[0].name},`);
+   if(node.params.length!==1||!t.isIdentifier(node.params[0]))bad(name);wrap(node,'native-resource-save-'+name,`${prefix}.${name==='_saveArtifactCommon'?'save':'saveUpload'}(this,${node.params[0].name},`,nativeProtectedResourceBody(node,source,name));
   }
  }
  const functions:t.FunctionDeclaration[]=[];t.traverseFast(ast,node=>{if(t.isFunctionDeclaration(node)&&node.id)functions.push(node)});
@@ -94,10 +96,19 @@ export function nativeResourcePolicyEdits(ast:t.Node,source:string):NativeResour
  const guardBlock=nativeOwner.body.body[0];if(!t.isTryStatement(guardBlock)||guardBlock.block.body.length!==1||!t.isExpressionStatement(guardBlock.block.body[0])||!t.isAwaitExpression(guardBlock.block.body[0].expression))bad('http-owner');
  const [a,b,c,d,e]=nativeOwner.params as t.Identifier[],statement=guardBlock.block.body[0];
  edits.push({start:statement.end!,end:statement.end!,label:'native-resource-http-read',text:`;await ${prefix}.httpRead(${a.name},{user:${b.name},metadata:${c.name},id:${d.name},label:${e.name}});`});seen.set('native-resource-http-read',1);
- const uploadHandlers:t.ArrowFunctionExpression[]=[];t.traverseFast(ast,node=>{if(t.isCallExpression(node)&&t.isMemberExpression(node.callee)&&t.isIdentifier(node.callee.property,{name:'post'})&&t.isStringLiteral(node.arguments[0],{value:'/api/projects/:pid/attachments'})&&t.isArrowFunctionExpression(node.arguments[1]))uploadHandlers.push(node.arguments[1])});
- if(uploadHandlers.length!==1||uploadHandlers[0].params.length!==2||!uploadHandlers[0].params.every(p=>t.isIdentifier(p)))bad('upload-request');const handler=uploadHandlers[0];
- let app:string|undefined;t.traverseFast(handler.body,node=>{if(t.isCallExpression(node)&&t.isMemberExpression(node.callee)&&t.isIdentifier(node.callee.property,{name:'getUser'})&&t.isIdentifier(node.callee.object))app=node.callee.object.name});if(!app)bad('upload-request');
- wrap(handler,'native-resource-upload-request',`${prefix}.withUploadRequest(${app},${(handler.params[0] as t.Identifier).name},`);
+ const uploadRoutes=[
+  {method:'post',path:'/api/projects/:pid/attachments',label:'native-resource-upload-request'},
+  {method:'post',path:'/api/artifacts/upload/init',label:'native-resource-upload-init'},
+  {method:'post',path:'/api/artifacts/upload/chunk',label:'native-resource-upload-chunk'},
+  {method:'post',path:'/api/artifacts/upload/finalize',label:'native-resource-upload-finalize'},
+  {method:'delete',path:'/api/artifacts/upload/:upload_id',label:'native-resource-upload-cancel'},
+ ] as const;
+ for(const route of uploadRoutes){
+  const handlers:t.ArrowFunctionExpression[]=[];t.traverseFast(ast,node=>{if(t.isCallExpression(node)&&t.isMemberExpression(node.callee)&&t.isIdentifier(node.callee.property,{name:route.method})&&t.isStringLiteral(node.arguments[0],{value:route.path})&&t.isArrowFunctionExpression(node.arguments[1]))handlers.push(node.arguments[1])});
+  if(handlers.length!==1||handlers[0].params.length!==2||!handlers[0].params.every(p=>t.isIdentifier(p)))bad(route.label);const handler=handlers[0];
+  let app:string|undefined;t.traverseFast(handler.body,node=>{if(t.isCallExpression(node)&&t.isMemberExpression(node.callee)&&t.isIdentifier(node.callee.property,{name:'getUser'})&&t.isIdentifier(node.callee.object))app=node.callee.object.name});if(!app)bad(route.label);
+  wrap(handler,route.label,`${prefix}.withUploadRequest(${app},${(handler.params[0] as t.Identifier).name},`);
+ }
  for(const label of nativeResourcePolicyBoundaries)if(seen.get(label)!==1)bad(label);
  const sorted=[...edits].sort((a,b)=>a.start-b.start);for(let i=1;i<sorted.length;i++)if(sorted[i].start<sorted[i-1].end)bad('overlap');return edits;
 }

@@ -14,6 +14,13 @@ test('Standard verified previews return identity without reading artifact bytes'
  const views=new ResourceViews(policy,async()=>{reads++;throw Error('must not read')});
  const result=await views.view({artifactId:v.artifactId,consumerFrameId:'ordinary'},signal());expect(result.decision).toBe('standard');expect(result.artifactId).toBe(v.artifactId);expect(reads).toBe(0);
 });
+test('Protected history closes context-free active previews while the exact owning standard frame still works',async()=>{
+ const f=fixture(),ordinary=f.add('ordinary'),secret=f.add('secret',{root:'protected'}),policy=f.store();
+ await policy.recordCreated(await policy.captureFrame('ordinary'),{versionId:ordinary.versionId});await policy.recordCreated(await policy.captureFrame('protected'),{versionId:secret.versionId});let reads=0;
+ const views=new ResourceViews(policy,async()=>{reads++;return ordinary.bytes});
+ expect((await views.view({versionId:ordinary.versionId},signal())).decision).toBe('blocked');expect(reads).toBe(0);
+ expect((await views.view({versionId:ordinary.versionId,consumerFrameId:'ordinary'},signal())).decision).toBe('standard');expect(reads).toBe(0);
+});
 test('Protected HTML is returned only as inert text with exact source, version and checksum',async()=>{
  const f=fixture(),v=f.add('protected-html',{root:'protected',text:'<img src="https://outside.example/leak">',type:'text/html'}),policy=f.store();await policy.recordCreated(await policy.captureFrame('protected'),{versionId:v.versionId});let options:any;
  const views=new ResourceViews(policy,async(exact,limits)=>{options=limits;return f.read(exact.storagePath)}),result=await views.view({versionId:v.versionId,consumerFrameId:'protected-child'},signal());

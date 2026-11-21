@@ -596,6 +596,7 @@
   "Review outgoing request": "外部への送信内容を確認",
   "Only the server-held request shown below can be sent. Permission applies once.": "送信できるのは、サーバーが保持している以下のリクエストだけです。許可は1回限り有効です。",
   "Why this request is needed": "送信が必要な理由",
+  "Configured connection": "使用する接続",
   "Exact destination": "実際の送信先",
   "The connection uses HTTPS.": "接続には HTTPS を使用します。",
   "The connection is not encrypted with HTTPS.": "この接続は HTTPS で暗号化されていません。",
