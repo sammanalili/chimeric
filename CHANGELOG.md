@@ -1,10 +1,11 @@
 # Changelog
 
-## 0.3.0-rc.7 - 2026-11-22
+## 0.3.0-rc.8 - 2026-11-22
 
 This source prerelease collects the fixes made after the public 0.3.0-rc.2 release. The original runtime and private profiles are excluded.
 
 - Fixed Anthropic subscription connection checks and sign-in. Dedicated official-client authentication commands avoid inference-option parsing, and Connect reuses an existing subscription sign-in before starting a new one.
+- Restricted installer process matching to the exact Chimeric executable and workspace, so unrelated terminal commands are never stopped.
 - Fixed credential binding for session and background model copies. In-flight requests keep their original endpoint and credential together when connection settings change; new requests use the updated connection.
 - Restored normal Markdown rendering in chat messages and kept artifact image examples literal inside code, protected previews and editable text.
 - Added native reference-image input for compatible OpenAI-style image-edit connections, including the verified RiVault route. The image tool accepts one to four PNG, JPEG or WebP Files versions, checks chat ownership and current access before dispatch, and sends multipart requests to the selected connection's `/images/edits` endpoint.

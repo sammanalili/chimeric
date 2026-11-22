@@ -6,7 +6,7 @@ Chimeric is a local research workspace that keeps the original research runtime 
 
 The public source contains the Chimeric integration, build tools, tests, and documentation. A compatible runtime is supplied separately as a versioned dependency with its original provenance. Runtime binaries, private profiles, API keys and personal research data are excluded from this publication.
 
-## Version 0.3.0-rc.7 fixes chat rendering and image references
+## Version 0.3.0-rc.8 fixes chat rendering and image references
 
 This source prerelease includes the fixes made after 0.3.0-rc.2:
 

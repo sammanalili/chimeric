@@ -194,14 +194,22 @@ def command_targets_profile(command: str, profile: Path) -> bool:
 
 
 def workspace_pids(ps_output: str, profile: Path, installed_app: Path) -> list[int]:
-    marker = str(installed_app / 'Contents/Resources')
+    executable = str(installed_app / 'Contents/Resources/bin/chimeric')
     result: list[int] = []
     for raw in ps_output.splitlines():
         fields = raw.strip().split(maxsplit=1)
         if len(fields) != 2 or not fields[0].isdigit():
             continue
         pid, command = int(fields[0]), fields[1]
-        if pid != os.getpid() and marker in command and command_targets_profile(command, profile):
+        # ps flattens argv without reliably quoting paths. Match the complete
+        # executable before parsing its arguments, so an ancestor shell that
+        # merely mentions the app and profile can never become a stop target.
+        if not command.startswith(executable):
+            continue
+        arguments = command[len(executable):]
+        if not arguments or not arguments[0].isspace():
+            continue
+        if pid != os.getpid() and command_targets_profile(arguments, profile):
             result.append(pid)
     return sorted(set(result))
 

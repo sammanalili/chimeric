@@ -1,7 +1,7 @@
 {
   "product": "Chimeric",
   "kind": "integration-source",
-  "version": "0.3.0-rc.7",
+  "version": "0.3.0-rc.8",
   "channel": "prerelease",
   "originalRuntimeIncluded": false,
   "privateProfileIncluded": false,
@@ -35,7 +35,7 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "8c77acce2875ce902bf7ccf7865674bf609dab3d05d201166c3ecca88bba4349"
+      "sha256": "a5c37711275227a448f4dd8a8700e9c590c609fdb8e28abf3e547a1280eb0a28"
     },
     {
       "path": "CONTRIBUTING.md",
@@ -55,11 +55,11 @@
     },
     {
       "path": "README.ja.md",
-      "sha256": "de724835d163037b0420ab7f78835236da7e693c383370b0805c9b382abd7ed7"
+      "sha256": "10d7c194ae174fa5623774d5f4b2cd8eaa090c04e29cd4504e98dd94d56faa45"
     },
     {
       "path": "README.md",
-      "sha256": "80b62ed59d41da08e578859f1f1e2d982719eb76cf19647368f9ef7cfcdf65fe"
+      "sha256": "6e65a11d9e8e8791b092e65ba23173d3ec68c9b51f7e09480be5679f1d369b41"
     },
     {
       "path": "SECURITY.md",
@@ -83,7 +83,7 @@
     },
     {
       "path": "docs/CLASS2-VALIDATION.md",
-      "sha256": "e20b4a481ec98f6ca3351c973cd9b52faf4050a585c2e33c84e83c2289b78f39"
+      "sha256": "4565e240199bf5e2d1f1475a177e4390e72d6f5b9fe60024eba0fbfc53410c56"
     },
     {
       "path": "docs/CLASSIFIERS.md",
@@ -127,11 +127,11 @@
     },
     {
       "path": "docs/RELEASE-AUDIT.md",
-      "sha256": "438034c393aaf0e0533ca00543e5d3d3c07dbe80dcdd5678f08e6f32a8f5dcf1"
+      "sha256": "0420311134891c3e01cdc9410758eef637702523101563172f8cb9d1a932d7ed"
     },
     {
       "path": "docs/RELEASE-READINESS.md",
-      "sha256": "94f68595b4bc76e55197e7493d4479d5aa0ff04f7ece3ff63fa789695a50ff50"
+      "sha256": "50efbb028fb5f01b9b8e7839762209934e60af8a28d6ce26de04f4b77d5be8fd"
     },
     {
       "path": "docs/SCIENTIFIC-SKILLS.md",
@@ -143,7 +143,7 @@
     },
     {
       "path": "docs/SOURCE-VERIFICATION.json",
-      "sha256": "e4da9922f38b2b28147b4c03ddece793071addd019143697c30475d89924105a"
+      "sha256": "f0cf752cd4646948f41b89968ff1a4c2ef9c1e06fb9f9ddc9fac5e1f03d3afa9"
     },
     {
       "path": "docs/USAGE-AND-PRICING.md",
@@ -151,7 +151,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "84bd0fdf31bfd64d957ab53a59f8bf5b03f8f9688c3a8c09ac5da907ef1c169b"
+      "sha256": "074451bf01a47f3a013a8599cc58516e52bd55d661e2807d1a9c194dd0572c68"
     },
     {
       "path": "providers.example.json",
@@ -159,7 +159,7 @@
     },
     {
       "path": "release-status.json",
-      "sha256": "de12fe86e36dbb3e8431b1d0e50f69b535ab305e0ef054ea585ed893d9b38cf7"
+      "sha256": "8c54fc7ab4d8520c80bca18650c3a02d75db9d02ca448b2b932ef1953280b7fa"
     },
     {
       "path": "release.manifest.json",
@@ -1055,7 +1055,7 @@
     },
     {
       "path": "tests/test_macos_installer.py",
-      "sha256": "7a04d5f24bdd3640073594836eacdfff34df37c2bed20abf19848da1336af725"
+      "sha256": "e6d7ac630ea37f172bfb363b160f58e78a8245c77992809bb84f615b69606ce6"
     },
     {
       "path": "tests/test_portable_export.py",
@@ -1151,7 +1151,7 @@
     },
     {
       "path": "tools/install-macos-app.py",
-      "sha256": "83dbc17c44433dda990b21c8e4b91d273441f1815082f8d23465df062cc88e3c"
+      "sha256": "e3e7b59a3e38cc7e1b7bbaf082823234ec23c7483ed7904160dbcc41de4ae2e4"
     },
     {
       "path": "tools/launcher.mjs",

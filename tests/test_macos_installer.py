@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import plistlib
+import shlex
 import shutil
 import tempfile
 import unittest
@@ -66,6 +67,30 @@ class MacOSInstallerTests(unittest.TestCase):
             f'104 {app}/Contents/Resources/bin/chimeric x --profile {profile}-other',
         ])
         self.assertEqual(installer.workspace_pids(output, profile, app), [101, 102])
+
+    def test_process_selection_rejects_callers_that_only_mention_the_runtime(self):
+        app = self.root / 'Applications/Chimeric.app'
+        profile = self.root / 'profile with spaces'
+        executable = app / 'Contents/Resources/bin/chimeric'
+        profile_argument = shlex.quote(str(profile))
+        output = '\n'.join([
+            f'201 /bin/zsh -lc set -e ; python3 /tmp/install-macos-app.py --profile {profile_argument} ; {executable} /tmp/check.ts',
+            f'202 /usr/bin/python3 /tmp/check.py --profile {profile_argument} --runtime {executable}',
+            f'203 /bin/echo {executable} --profile {profile_argument}',
+            f'204 {executable}-other launcher.mjs daemon --profile {profile_argument}',
+        ])
+        self.assertEqual(installer.workspace_pids(output, profile, app), [])
+
+    def test_process_selection_accepts_the_runtime_in_a_destination_with_spaces(self):
+        app = self.root / 'Custom Applications/Chimeric.app'
+        profile = self.root / 'profile with spaces'
+        executable = app / 'Contents/Resources/bin/chimeric'
+        launcher = app / 'Contents/Resources/launcher.mjs'
+        output = '\n'.join([
+            f'301 {executable} {shlex.quote(str(launcher))} daemon --profile {shlex.quote(str(profile))} --port 18868',
+            f'302 {executable} {shlex.quote(str(launcher))} daemon {shlex.quote("--profile=" + str(profile))} --port 18868',
+        ])
+        self.assertEqual(installer.workspace_pids(output, profile, app), [301, 302])
 
     def test_replace_is_transactional_and_keeps_the_previous_bundle_as_a_backup(self):
         source_path = self.fixture_app('new/Chimeric.app')

@@ -1,4 +1,4 @@
-# Version 0.3.0-rc.7 publishes the checked integration source
+# Version 0.3.0-rc.8 publishes the checked integration source
 
 This prerelease publishes Chimeric's integration source, tests, build tools and
 documentation. It does not include the preserved runtime binary or a native app
@@ -29,7 +29,7 @@ They were not notarized.
 These checks establish basic startup and seeded database persistence for the
 recorded candidates. They do not establish a complete backup/restore cycle,
 research-tool-to-artifact round trip or the behavior of an app rebuilt from
-0.3.0-rc.7. App and archive hashes remain attached to the historical verification
+0.3.0-rc.8. App and archive hashes remain attached to the historical verification
 records rather than being presented as identities for this source release.
 
 ## Branding and Japanese coverage remain partial
