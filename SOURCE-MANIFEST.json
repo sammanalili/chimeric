@@ -54,11 +54,11 @@
     },
     {
       "path": "README.ja.md",
-      "sha256": "3ee30fd9a9198233c4196637a4e01421ed8d9848c7743c0447caff6ade84f2cf"
+      "sha256": "2b4c30ac5bbbe2edfa4225d3ac7737d566fefb954ad293c640cca5838130bf0a"
     },
     {
       "path": "README.md",
-      "sha256": "9d4684d1e3afaaa3fc7180c14b7eb38fd121a6fd91d2be5360a19de2526ed389"
+      "sha256": "839df327e55604dbcfbc7f776a3dffe079527afe68a1b14ba387e9972f552053"
     },
     {
       "path": "SECURITY.md",
@@ -134,7 +134,7 @@
     },
     {
       "path": "docs/SCIENTIFIC-SKILLS.md",
-      "sha256": "334b8bf6f76b2d36cb516cc6ddd713bc3f5e3707f581d8bea224514a84bc97c0"
+      "sha256": "88e2edc5fb59bf4dc0b7aa83e38bed94d198feead2777eb4c78781e43940dca5"
     },
     {
       "path": "docs/SECURITY-SCANNING.md",

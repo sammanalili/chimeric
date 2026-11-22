@@ -33,6 +33,9 @@ The source-boundary and source-license gates have passed on the reviewed export.
 
 ## Platform installation
 
+The four scientific communication skills are also available as a standalone
+[versioned download with installation instructions](docs/SCIENTIFIC-SKILLS.md#download-version-100).
+
 - [macOS installation](docs/INSTALL-MAC.md) for the Apple Silicon native app and AppKit/WKWebView window.
 - [Linux installation](docs/INSTALL-LINUX.md) for the checked Linux x64 technical preview.
 - [WSL2 installation](docs/INSTALL-WSL.md) for Ubuntu on Windows.

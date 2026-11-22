@@ -31,6 +31,9 @@ AGY の機能回帰証拠は 15 ファイル、239 テスト、1,460 アサー�
 
 ## プラットフォーム別インストール
 
+科学コミュニケーション用の4つのスキルは、単独でも利用できます。
+[バージョン別のダウンロードと導入手順](docs/SCIENTIFIC-SKILLS.md#download-version-100)を参照してください。
+
 - [macOS インストール](docs/INSTALL-MAC.md)
 - [Linux インストール](docs/INSTALL-LINUX.md)
 - [WSL2 インストール](docs/INSTALL-WSL.md)
