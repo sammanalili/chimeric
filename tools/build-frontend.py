@@ -74,11 +74,13 @@ for name, data in sorted(science_skills.items()):
 for path in [Path(__file__), Path(__file__).with_name('brand-frontend.mjs'), Path(__file__).with_name('native-voice-context.ts'), Path(__file__).with_name('native-browser-policy.ts'), Path(__file__).with_name('native-upload-context.ts'), Path(__file__).with_name('ui_style.py'),Path(__file__).with_name('brand_skill_resources.py'),resources/'product-self-knowledge.md',
              Path(__file__).with_name('brand_product_resources.py'), Path(__file__).with_name('product-branding.ts'),
              *[resources / name for name in ['atom-component.js.fragment', 'chimeric-dna.json', 'chimeric-favicon.svg',
-                 'chimeric-icon-192.png', 'chimeric-icon-512.png', 'provider-settings.js', 'chatgpt-credentials.js', 'ja.json', 'chimeric-ui.css',
+                 'chimeric-icon-192.png', 'chimeric-icon-512.png', 'provider-settings.js', 'chatgpt-credentials.js', 'ja.json', 'chimeric-ui.css', 'artifact-markdown.js',
                  'chimeric-atom-3d.svg', 'chimeric-atom-3d-static.svg', 'antigravity-settings.js', 'image-generation-settings.js', 'decision-settings.js', 'voice-settings.js', 'usage-indicator.js', 'class2-settings.js', 'provider-events.js', 'protected-resource-view.js']],resources.parent/'bun.lock']:
     version_hash.update(path.name.encode() + b'\0' + path.read_bytes() + b'\0')
 version = '?chimeric=' + version_hash.hexdigest()[:16]
 own_style_name, own_style, own_images = style_resources(resources)
+artifact_markdown_name='chimeric-artifact-markdown.js'
+artifact_markdown=(resources/'artifact-markdown.js').read_bytes()
 with tarfile.open(source, 'r:gz') as original:
     entries = [(member, original.extractfile(member).read() if member.isfile() else None) for member in original]
 asset_names = [m.name.removeprefix('./web-dist/assets/') for m, _ in entries if m.name.startswith('./web-dist/assets/') and m.name.endswith('.js')]
@@ -149,6 +151,7 @@ for index, (member, data) in enumerate(entries):
         updated = updated.replace(b'<title>Claude Science</title>', b'<title>Chimeric</title>')
         updated = updated.replace(b'</head>', b'<script src="/api/local/i18n/bootstrap.js"></script></head>')
         updated = updated.replace(b'</head>', ('<link data-chimeric-ui="true" rel="stylesheet" href="./assets/'+own_style_name+'"></head>').encode())
+        updated = updated.replace(b'</head>', ('<script type="module" data-chimeric-artifact-markdown="true" src="./assets/'+artifact_markdown_name+version+'"></script></head>').encode())
         for asset in ['favicon.svg', 'manifest.webmanifest', 'icon-192.png']:
             updated = updated.replace(('href="./'+asset+'"').encode(), ('href="./'+asset+version+'"').encode())
     elif member.name == './agents/operon/metadata.yaml':
@@ -204,7 +207,7 @@ for name, data in science_skills.items():
     member.size = len(data)
     member.mode = 0o644
     entries.append((member, data))
-for name, data in {own_style_name: own_style, **own_images}.items():
+for name, data in {own_style_name: own_style, artifact_markdown_name: artifact_markdown, **own_images}.items():
     member = tarfile.TarInfo('./web-dist/assets/' + name)
     member.size = len(data)
     member.mode = 0o644

@@ -74,7 +74,12 @@ export class NativeSecurityRuntime {
    protectionEnabled,
    ownerUserId:options.owner.userId,
    withProtectedWrite:(frameId,kind,operation)=>this.storage.withResourceWrite(frameId,kind,operation),
-   withProtectedRead:(resource,evidence,operation)=>Promise.resolve(this.storage.withResourceRead(resource,evidence.storageRootFrameIds,operation)),
+   // Ordinary artifacts are already authenticated and policy-checked by
+   // ResourcePolicyStore. Only Class 2 lineage is stored under the private
+   // reserve and therefore needs a protected-storage read lease.
+   withProtectedRead:(resource,evidence,operation)=>evidence.storageRootFrameIds.length
+    ?Promise.resolve(this.storage.withResourceRead(resource,evidence.storageRootFrameIds,operation))
+    :operation(),
   });
   const reader=new NativeResourceReader(options.profileDir,{
    protectedRoot:this.storage.reserve,

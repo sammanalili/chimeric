@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {dispatchModel} from './model-dispatch';
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript';
-import { Registry } from './registry';
+import { Registry, withModelReplayKey } from './registry';
 import { ContentReader } from './content';
 import { ReplayStore, toContext, nativeMessage, nativeUsage, stopReason, toolChoice, toNativeContent } from './protocol';
 import { localServerTool, executeServerTool } from './server-tools';
@@ -57,13 +57,13 @@ export function startBridge(registry: Registry, token: string, port = 0, serverT
         if(authorization)body.model=authorization.modelId;
         await authorization?.assertCurrent();
         let model = registry.resolve(body.model);
-        if(authorization?.replayNamespace)model={...model,replayKey:(model.replayKey??model.qualifiedId)+'@native-root:'+authorization.replayNamespace};
+        if(authorization?.replayNamespace)model=withModelReplayKey(model,(model.replayKey??model.qualifiedId)+'@native-root:'+authorization.replayNamespace);
         if(model.api==='anthropic-messages'&&model.id===FABLE_5_2_ID&&(body.thinking?.type==='disabled'||body.thinking?.type==='enabled'||body.output_config?.effort==='off'))throw anthropicConfigurationError('Claude Fable 5.2 requires adaptive thinking and does not support thinking off or manual thinking budgets.');
         const cancel=new AbortController(),policySignal=AbortSignal.any([request.signal,cancel.signal,...authorization?.signal?[authorization.signal]:[]]);
         const {sessionScope,...auth}=await registry.requestAuth(model,policySignal);
         policySignal.throwIfAborted();await authorization?.assertCurrent();
         const usageBinding=registry.usage?.captureBinding(model.provider);
-        if(sessionScope)model={...model,replayKey:model.replayKey+'@'+sessionScope};
+        if(sessionScope)model=withModelReplayKey(model,model.replayKey+'@'+sessionScope);
         const localTools = new Set<string>();
         const converted = { ...body, tools: (body.tools ?? []).map((t: any) => {
           const local = localServerTool(t); if (local) { localTools.add(t.name); return local; } return t;

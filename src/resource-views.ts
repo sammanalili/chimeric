@@ -7,7 +7,14 @@ import {isInertRasterData} from './resource-http';
 const blocked=(reason='This file has no verified preview permission for the current research chat.'):ResourceView=>({decision:'blocked',reason});
 const raster=/^image\/(?:png|jpeg|gif|webp)$/i;
 const text=/^(?:text\/|application\/(?:json|[^;]+\+json|xml|[^;]+\+xml|javascript)(?:;|$)|image\/svg\+xml(?:;|$))/i;
+const MAX_INLINE_IMAGE_BYTES=8*1024*1024;
+const validRasterBytes=(mime:string,bytes:Uint8Array)=>
+ mime==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):
+ mime==='image/jpeg'?bytes[0]===255&&bytes[1]===216&&bytes[2]===255:
+ mime==='image/gif'?['GIF87a','GIF89a'].includes(Buffer.from(bytes.subarray(0,6)).toString('ascii')):
+ mime==='image/webp'?Buffer.from(bytes.subarray(0,4)).toString('ascii')==='RIFF'&&Buffer.from(bytes.subarray(8,12)).toString('ascii')==='WEBP':false;
 export type ResourceViewReader=(resource:NativeArtifactContext,options:{maxBytes:number;signal:AbortSignal})=>Promise<Uint8Array>;
+export type InlineResourceImage=Readonly<{contentType:'image/png'|'image/jpeg'|'image/gif'|'image/webp';bytes:Uint8Array}>;
 
 /** The policy decision controls mounting. Reading is independently authorized
  * against the exact version. The supplied native reader must cap bytes while
@@ -17,6 +24,22 @@ export type ResourceViewReader=(resource:NativeArtifactContext,options:{maxBytes
 export class ResourceViews implements ResourceViewBackend {
  constructor(private policy:ResourcePolicyStore,private readExact:ResourceViewReader){}
  async unbound(input:{consumerFrameId?:string},signal:AbortSignal):Promise<UnboundResourceView>{signal.throwIfAborted();const decision=await this.policy.unboundStandardDecision(input.consumerFrameId);signal.throwIfAborted();return decision.decision==='standard-unbound'?{decision:'standard-unbound',policyRevision:decision.revision,...decision.consumerRootFrameId?{consumerRootFrameId:decision.consumerRootFrameId}:{}}:blocked(decision.reason)}
+ /** Returns one exact local raster for ordinary Markdown image links. The
+  * policy still decides before bytes are opened, so an unclassified artifact
+  * cannot cross into Class 2 and a protected artifact needs its protected
+  * consumer context. */
+ async image(input:ResourceViewInput,signal:AbortSignal):Promise<InlineResourceImage>{
+  signal.throwIfAborted();const lookup=input.versionId?{versionId:input.versionId}:{artifactId:input.artifactId!},decision=await this.policy.renderDecision({...lookup,consumerFrameId:input.consumerFrameId});signal.throwIfAborted();
+  if(decision.decision==='blocked'||!decision.resource)throw new Error('The image is unavailable in this chat.');
+  const purpose=decision.decision==='inert'?'inert-image':'raw-bytes',lease=await this.policy.authorize({versionId:decision.resource.versionId},input.consumerFrameId,purpose);
+  return await this.policy.materialize(lease,async resource=>{
+   signal.throwIfAborted();const contentType=resource.contentType.split(';',1)[0].trim().toLowerCase();
+   if(!raster.test(contentType)||resource.sizeBytes<1||resource.sizeBytes>MAX_INLINE_IMAGE_BYTES)throw new Error('The image is not available for inline display.');
+   const bytes=Buffer.from(await this.readExact(resource,{maxBytes:MAX_INLINE_IMAGE_BYTES,signal}));signal.throwIfAborted();
+   if(bytes.length!==resource.sizeBytes||createHash('sha256').update(bytes).digest('hex')!==resource.checksum||!validRasterBytes(contentType,bytes))throw new Error('The image changed before it could be displayed.');
+   return {contentType:contentType as InlineResourceImage['contentType'],bytes};
+  });
+ }
  async view(input:ResourceViewInput,signal:AbortSignal):Promise<ResourceView>{
   signal.throwIfAborted();const lookup=input.versionId?{versionId:input.versionId}:{artifactId:input.artifactId!};
   const decision=await this.policy.renderDecision({...lookup,consumerFrameId:input.consumerFrameId});signal.throwIfAborted();

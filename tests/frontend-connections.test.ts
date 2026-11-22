@@ -22,6 +22,13 @@ const python=process.env.CHIMERIC_PYTHON??['python3.14','python3.13','python3.12
   expect(binding.exitCode,binding.stderr.toString()).toBe(0);
   const component=readFileSync(join(manifest.root,'web-dist/assets/index-DXq2yXE0.js'),'utf8');
   const program=parse(component,{sourceType:'module'}).program;
+  expect(component).toContain('"data-testid":"chimeric-connections"');
+  expect(component).toContain('title:tr("Connections")');
+  // The original generic secret directory was not a model-connection UI and
+  // must not remain available behind Chimeric's Connections screen.
+  for(const inherited of ['AWS','Google Cloud','Microsoft Azure','NVIDIA API','OpenAlex','Literature access (journals, etc.)','API keys and tokens for services Claude uses on your behalf']){
+   expect(component).not.toContain(inherited);
+  }
   const expected=[
    ['LocalAnthropicCredentials','AnthropicCredentials','/api/local/providers/component.js'],
    ['LocalChatGPTCredentials','ChatGPTCredentials','/api/local/chatgpt/component.js'],
@@ -47,6 +54,10 @@ const python=process.env.CHIMERIC_PYTHON??['python3.14','python3.13','python3.12
   const sequence=expected.map(([name])=>component.indexOf('.jsx('+name+','));
   expect(sequence.every((value,i)=>value>=0&&(i===0||value>sequence[i-1]))).toBe(true);
   expect(component).not.toContain('/api/local/antigravity/workbench');expect(component).not.toContain('antigravity-client');
+  const capabilities=readFileSync(join(manifest.root,'web-dist/assets/CapabilitiesPage-D3j7I2By.js'),'utf8');
+  expect(capabilities).toContain('S as LocalChimericConnections');
+  expect(capabilities.match(/e\.jsx\(LocalChimericConnections\.ConnectionsContent,\{\}\)/g)).toHaveLength(2);
+  expect(capabilities).not.toContain('e.jsx(da,{})');
   const main=readFileSync(join(manifest.root,'web-dist/assets/index-BgpYmw3d.js'),'utf8');
   expect(main).toContain('ImageGenerationChoice as LocalChimericImageGenerationChoice');
   expect(main.match(/a\.jsx\(LocalChimericImageGenerationChoice,\{compact:!0\}\)/g)).toHaveLength(1);
@@ -69,7 +80,8 @@ const python=process.env.CHIMERIC_PYTHON??['python3.14','python3.13','python3.12
   expect(rootChildren[2].arguments[1].properties.some((node:any)=>node.key?.value==='data-testid'&&node.value?.value==='composer')).toBe(true);
   expect(calls.filter(node=>node.arguments[0]?.name==='LocalChimericOutboundReviews')).toHaveLength(1);
   expect(main).not.toContain('https://claude.ai/admin-settings/');expect(main).not.toContain('https://claude.com/upgrade?');
-  expect(main).toContain('https://status.claude.com');
+  expect(main).toContain('/api/local/help#connections');
+  expect(main).not.toContain('https://status.claude.com');
   expect(manifest.moduleVersion).toMatch(/^\?chimeric=[a-f0-9]{16}$/);
   for(const name of ['scientific-writing','scientific-data-visualization','scientific-illustration','scientific-documents']){
    const entry=readFileSync(join(manifest.root,'skills',name,'SKILL.md'),'utf8');
@@ -83,5 +95,16 @@ test('frontend link repair preserves explicit provider links while updating reti
  const source='export const links={providerDocs:"https://docs.anthropic.com/en/docs/claude-code",providerUsage:"https://claude.ai/settings/usage",providerStatus:"https://status.claude.com",appDocs:"https://claude.com/docs/claude-science"};';
  const result=Bun.spawnSync([process.execPath,join(root,'tools/brand-frontend.mjs')],{cwd:root,env:{...process.env,BUN_BE_BUN:'1'},stdin:Buffer.from(JSON.stringify([{name:'./web-dist/assets/provider-links-fixture.js',text:source}])),stdout:'pipe',stderr:'pipe'});
  expect(result.exitCode,result.stderr.toString()).toBe(0);const changed=JSON.parse(result.stdout.toString()).files[0].text;
- expect(changed).toContain('https://docs.anthropic.com/en/docs/claude-code');expect(changed).toContain('https://claude.ai/settings/usage');expect(changed).toContain('https://status.claude.com');expect(changed).toContain('/api/local/help');expect(changed).not.toContain('https://claude.com/docs/claude-science');
+ expect(changed).toContain('https://docs.anthropic.com/en/docs/claude-code');expect(changed).toContain('https://claude.ai/settings/usage');expect(changed).toContain('/api/local/help#connections');expect(changed).toContain('/api/local/help');expect(changed).not.toContain('https://status.claude.com');expect(changed).not.toContain('https://claude.com/docs/claude-science');
+});
+
+test('first-run copy does not force an autonomous mode or retain the old Connections label',()=>{
+ const source='export const copy={notice:"Auto mode is now on by default",detail:"Claude runs on its own and pauses to ask if anything looks unsafe.",title:"Credentials"};';
+ const result=Bun.spawnSync([process.execPath,join(root,'tools/brand-frontend.mjs')],{cwd:root,env:{...process.env,BUN_BE_BUN:'1'},stdin:Buffer.from(JSON.stringify([{name:'./web-dist/assets/onboarding-copy-fixture.js',text:source}])),stdout:'pipe',stderr:'pipe'});
+ expect(result.exitCode,result.stderr.toString()).toBe(0);const changed=JSON.parse(result.stdout.toString()).files[0].text;
+ expect(changed).toContain('Chimeric is ready.');
+ expect(changed).toContain('Chimeric works within the permissions you choose for each session.');
+ expect(changed).toContain('Connections');
+ expect(changed).not.toContain('Auto mode is now on by default');
+ expect(changed).not.toContain('Claude runs on its own');
 });

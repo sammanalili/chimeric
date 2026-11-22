@@ -1,22 +1,22 @@
 {
   "product": "Chimeric",
-  "version": "0.3.0-rc.2",
+  "version": "0.3.0-rc.7",
   "channel": "prerelease",
-  "reviewedOn": "2026-11-21",
+  "reviewedOn": "2026-11-22",
   "releaseGates": [
     {
       "id": "source-checks",
       "status": "passed",
       "requirement": "The clean source boundary, documentation links, credential exclusions and regression tests pass on the exported tree.",
       "evidence": "docs/SOURCE-VERIFICATION.json",
-      "note": "The reviewed source export passed the strict release check. The final scan record identifies the exact exported bytes separately, so this public status file does not become self-referential."
+      "note": "The 0.3.0-rc.7 clean export passed 991 Bun tests and 63 Python tests, with 68 and four declared native-fixture skips respectively. The current source verification records exact scope."
     },
     {
       "id": "artifact-scan",
-      "status": "passed",
+      "status": "partial",
       "requirement": "The exact frozen source, Apple Silicon Mac app and Mac ZIP pass the configured local secret and malware-signature scans. Linux artifacts require their own verified-build scan record.",
       "evidence": "docs/SECURITY-SCANNING.md",
-      "note": "Gitleaks reported zero unreviewed and two exact reviewed findings. ClamAV database 28189 reported zero infected files and zero errors. The private record contains exact hashes and counts. This does not prove the absence of malware or vulnerabilities."
+      "note": "The source publication has its own final export/archive scan record in the release VERIFICATION.json. No new public runtime binary is included, and historical Mac/Linux package scans do not verify this source revision as a packaged app."
     },
     {
       "id": "fresh-profile",

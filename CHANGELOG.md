@@ -1,8 +1,39 @@
 # Changelog
 
-## 0.3.0-rc.2 - Unreleased
+## 0.3.0-rc.7 - 2026-11-22
 
-- Continued the Class 2 implementation across protected storage, browser resources, reviewed egress and native execution. This release candidate remains unreleased until the packaged Class 2 workflow passes.
+This source prerelease collects the fixes made after the public 0.3.0-rc.2 release. The original runtime and private profiles are excluded.
+
+- Fixed Anthropic subscription connection checks and sign-in. Dedicated official-client authentication commands avoid inference-option parsing, and Connect reuses an existing subscription sign-in before starting a new one.
+- Fixed credential binding for session and background model copies. In-flight requests keep their original endpoint and credential together when connection settings change; new requests use the updated connection.
+- Restored normal Markdown rendering in chat messages and kept artifact image examples literal inside code, protected previews and editable text.
+- Added native reference-image input for compatible OpenAI-style image-edit connections, including the verified RiVault route. The image tool accepts one to four PNG, JPEG or WebP Files versions, checks chat ownership and current access before dispatch, and sends multipart requests to the selected connection's `/images/edits` endpoint.
+- Included the generated-image artifact resolver and macOS startup/update repairs from internal candidates rc.3 through rc.6.
+- Updated app-owned Connections routing, displayed instructions and help links while retaining upstream provenance and compatibility identifiers.
+- Published the four standalone scientific communication skills as [skill-pack version 1.0.0](https://github.com/sammanalili/chimeric/releases/tag/scientific-skills-v1.0.0), with individual importable ZIPs and an Apache-2.0 license.
+
+## 0.3.0-rc.6 - Internal candidate
+
+- Fixed the macOS native launch path so it waits on the daemon's local control socket instead of repeatedly starting helper runtimes during startup. This prevents a slow sandbox initialization from being starved and falsely reported as a port conflict.
+- Extended the native helper guard to 210 seconds. The launcher still has a bounded three-minute readiness timeout and stops only the daemon it started if that limit is reached.
+
+## 0.3.0-rc.5 - Internal candidate
+
+- Repaired generated-image messages that displayed raw artifact handles. Existing local Markdown image handles now resolve through the checked same-origin image route.
+
+## 0.3.0-rc.4 - Internal candidate
+
+- Fixed ordinary local artifact and inline-image rendering after Class 2 had been used elsewhere. Confirmed Class 2 artifacts and Class 2 chats remain protected.
+- Added a checked same-origin raster route and Markdown artifact-handle resolver so existing generated-image messages surface their saved local image instead of displaying a raw `{{artifact:…}}` handle.
+
+## 0.3.0-rc.3 - Internal candidate
+
+- Repaired native macOS update behavior: an update now stops the matching daemon before replacement, prevents a failed new daemon from lingering, and redirects both Connections routes to the Chimeric settings surface.
+- The packaged installer now relocates a workspace stored under Desktop, Documents or Downloads into Application Support before native launch. It preserves the original workspace and any prior default profile.
+
+## 0.3.0-rc.2 - Source prerelease
+
+- Continued the Class 2 implementation across protected storage, browser resources, reviewed egress and native execution. The packaged Class 2 workflow remains unapproved for protected data until validation passes.
 - Kept the final source-release audit open until Class 2 and its exact packaged evidence are frozen.
 
 ## 0.3.0-rc.1 - 2026-11-20

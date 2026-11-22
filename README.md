@@ -4,17 +4,46 @@
 
 Chimeric is a local research workspace that keeps the original research runtime and harness while adding a provider-neutral model layer, a native Chimeric launcher, local credential handling, model discovery, reasoning controls, vision input, a static DNA mark, and an animated atom identity. The canonical public source location is [sammanalili/chimeric](https://github.com/sammanalili/chimeric).
 
-The public source contains the Chimeric integration, build tools, tests, and documentation. The original runtime remains a versioned integration dependency with its original provenance, and recovered runtime binaries, packaged runtime previews, private profiles, API keys, and personal research data are supplied separately.
+The public source contains the Chimeric integration, build tools, tests, and documentation. A compatible runtime is supplied separately as a versioned dependency with its original provenance. Runtime binaries, private profiles, API keys and personal research data are excluded from this publication.
 
-## Version 0.3.0-rc.2 is in preparation
+## Version 0.3.0-rc.7 fixes chat rendering and image references
 
-The current working version adds a compact usage/price indicator beside the model picker, official-client Claude subscription connections, Fable 5.2 compatibility, shared image choices, optional classifiers and four generic scientific skills. Reported subscription quota is kept separate from locally tracked tokens and estimated API costs. Unknown prices and quota remain unavailable.
+This source prerelease includes the fixes made after 0.3.0-rc.2:
 
-The release process exports only the reviewed source manifest, runs the strict source checks, then scans the exact export and named build artifacts. Its current test and scan records are described in [the release audit](docs/RELEASE-AUDIT.md) and [the release gates](release-status.json).
+- Chat messages render paragraphs, bold text and lists normally. Artifact image
+  handles resolve to their saved local images, while examples inside code and
+  editable text remain literal.
+- Compatible image connections, including the tested RiVault route, can receive
+  one to four PNG, JPEG or WebP reference images from the current research chat.
+  The image tool accepts pinned Files version IDs and sends multipart requests to
+  the selected connection's image-edit endpoint. Unsupported transports reject
+  reference input instead of silently dropping it.
+- The macOS launcher waits for the existing daemon through its local control
+  socket. Slow sandbox startup no longer starts repeated helper runtimes or
+  produces a false port-conflict error.
+- Native updates stop the matching daemon before replacement and retain a rollback
+  copy. Connections routes lead to Chimeric settings, and app-owned instructions
+  and help links use the Chimeric identity.
 
-The designated Mac candidate is an Apple Silicon `Chimeric.app` built from this source. It passes strict local code-signature verification with an ad-hoc signature. It is not notarized, so macOS Gatekeeper does not accept it as a notarized public distribution.
+The integration also includes compact usage and API-price indicators, official-client
+Claude subscription connections, Fable 5.2 compatibility, shared image choices,
+optional classifiers and four generic scientific skills. Reported subscription
+quota stays separate from locally tracked tokens and estimated API costs.
 
-The 2026-11-21 source export, Apple Silicon app and Mac ZIP passed the local Gitleaks and ClamAV scan procedure with zero unreviewed secret findings, zero signature detections and zero scan errors. The exact hashes and scanner results stay in a private release record. This is evidence for those exact bytes, not proof that the app is free of vulnerabilities or malware. The Mac app is ad-hoc signed and not notarized. Full backup/restore and research-tool round trips, packaged credential isolation, managed converters, the complete Linux harness, WSL, portable voice dependencies and runtime distribution rights remain open. Class 2 is still being completed and is not approved for protected data yet. Fail-closed checks alone do not close that gate. See [the Class 2 validation](docs/CLASS2-VALIDATION.md), [the final audit](docs/RELEASE-AUDIT.md), [release evidence](docs/RELEASE-READINESS.md), [release gates](release-status.json), and [the security-scanning method](docs/SECURITY-SCANNING.md).
+The public download contains integration source, tests, build tools and docs.
+The original runtime, native app binaries, private profiles, API keys and research
+files are excluded. New Chimeric source uses Apache-2.0; upstream components keep
+their own licenses and provenance.
+
+Current verification and exact scan scope are recorded in [the release
+audit](docs/RELEASE-AUDIT.md), [source verification](docs/SOURCE-VERIFICATION.json)
+and [release gates](release-status.json). The Mac candidate is ad-hoc signed and
+not notarized. Full backup/restore and research-tool round trips, packaged
+credential isolation, managed converters, the complete Linux harness, WSL,
+portable voice dependencies and runtime distribution rights remain open.
+Class 2 is not approved for protected data until its packaged workflow passes.
+See [the Class 2 validation](docs/CLASS2-VALIDATION.md) and [release
+readiness](docs/RELEASE-READINESS.md) for those requirements.
 
 ## Previous version 0.2.0-rc.1
 
@@ -29,7 +58,7 @@ Highlights for this prerelease:
 
 AGY evidence includes a live 1024 × 1024 JPEG, native artifact and receipt checks, and 239 focused tests with 1,460 assertions across 15 files. The catalog-fix evidence includes 118 tests and 806 assertions, with one browser OAuth test skipped.
 
-The source-boundary and source-license gates have passed on the reviewed export. Verification remains in progress for a fresh-install and restore test, runtime sandbox isolation, managed portable converters, native Linux and Docker execution, Linux arm64 packaging, voice portability, the final brand and locale audit, and redistribution review for the preserved runtime and bundled components. New Chimeric source is selected for Apache License 2.0; that selection does not license upstream material. These gates are recorded in [docs/RELEASE-READINESS.md](docs/RELEASE-READINESS.md). This prerelease remains a private technical preview while those gates are open.
+The earlier prerelease verification applies to its recorded source and artifacts. Current platform and distribution status is tracked in [docs/RELEASE-READINESS.md](docs/RELEASE-READINESS.md).
 
 ## Platform installation
 

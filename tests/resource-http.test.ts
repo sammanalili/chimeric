@@ -3,19 +3,26 @@ import {EventEmitter} from 'node:events';
 import {installResourceHttp} from '../src/resource-http';
 
 const valid={decision:'standard',artifactId:'artifact',versionId:'version',checksum:'a'.repeat(64),sourceRootFrameId:'source',consumerRootFrameId:'consumer',policyRevision:3};
-function fixture(view:(input:any,signal:AbortSignal)=>Promise<unknown>,unbound:(input:any,signal:AbortSignal)=>Promise<unknown>=async()=>({decision:'blocked'})){
- const routes=new Map<string,Function>(),calls:any[]=[],unboundCalls:any[]=[],app={get:(path:string,callback:Function)=>routes.set(path,callback),getUser:(request:any)=>request.user};
- installResourceHttp(app,{view:async(input,signal)=>{calls.push(input);return view(input,signal)},unbound:async(input,signal)=>{unboundCalls.push(input);return unbound(input,signal)}},{ownerUserId:'owner',moduleVersion:'?fixture=1'});
+function fixture(view:(input:any,signal:AbortSignal)=>Promise<unknown>,unbound:(input:any,signal:AbortSignal)=>Promise<unknown>=async()=>({decision:'blocked'}),image:(input:any,signal:AbortSignal)=>Promise<unknown>=async()=>({contentType:'image/png',bytes:Buffer.from([137,80,78,71,13,10,26,10])})){
+ const routes=new Map<string,Function>(),calls:any[]=[],unboundCalls:any[]=[],imageCalls:any[]=[],app={get:(path:string,callback:Function)=>routes.set(path,callback),getUser:(request:any)=>request.user};
+ installResourceHttp(app,{view:async(input,signal)=>{calls.push(input);return view(input,signal)},unbound:async(input,signal)=>{unboundCalls.push(input);return unbound(input,signal)},image:async(input,signal)=>{imageCalls.push(input);return image(input,signal)}},{ownerUserId:'owner',moduleVersion:'?fixture=1'});
  const invoke=async(path:string,query:any,options:any={})=>{
   const request:any={query,user:{user_id:'owner'},raw:new EventEmitter(),...options},reply:any={status:200,headers:{},raw:Object.assign(new EventEmitter(),{writableEnded:false}),header(name:string,value:string){this.headers[name]=value;return this},type(value:string){return this.header('content-type',value)},code(status:number){this.status=status;return this},send(body:any){this.body=body;return body}};
   await routes.get(path)!(request,reply);return {request,reply};
  };
- return {call:(query:any,options:any={})=>invoke('/api/local/resources/policy',query,options),callUnbound:(query:any,options:any={})=>invoke('/api/local/resources/unbound',query,options),calls,unboundCalls,routes};
+ return {call:(query:any,options:any={})=>invoke('/api/local/resources/policy',query,options),callUnbound:(query:any,options:any={})=>invoke('/api/local/resources/unbound',query,options),callImage:(query:any,options:any={})=>invoke('/api/local/resources/image',query,options),calls,unboundCalls,imageCalls,routes};
 }
 test('Resource view requires native workspace principal before backend or query lookup',async()=>{
  const f=fixture(async()=>{throw Error('must not run')});
  for(const user of [undefined,{user_id:'other'}]){const {reply}=await f.call({versionId:'version'},{user});expect(reply.status).toBe(403)}
  expect(f.calls).toHaveLength(0);
+});
+test('Inline image endpoint accepts only a checked local raster and never discloses backend errors',async()=>{
+ const bytes=Buffer.from([137,80,78,71,13,10,26,10]),f=fixture(async()=>valid,async()=>({decision:'blocked'}),async()=>({contentType:'image/png',bytes}));
+ const {reply}=await f.callImage({versionId:'version',consumerFrameId:'consumer'});expect(reply.status).toBe(200);expect(reply.body).toEqual(bytes);expect(reply.headers['content-type']).toBe('image/png');expect(reply.headers['cache-control']).toBe('no-store, private');expect(reply.headers['cross-origin-resource-policy']).toBe('same-origin');expect(f.imageCalls).toEqual([{versionId:'version',consumerFrameId:'consumer'}]);
+ for(const query of [{},{artifactId:'artifact'},{versionId:'../path'},{versionId:'version',url:'https://outside.example'}])expect((await f.callImage(query)).reply.status).toBe(400);
+ expect((await f.callImage({versionId:'version'},{user:{user_id:'other'}})).reply.status).toBe(403);
+ const hidden=fixture(async()=>valid,async()=>({decision:'blocked'}),async()=>{throw Error('/private/token')});const failure=await hidden.callImage({versionId:'version'});expect(failure.reply.status).toBe(404);expect(JSON.stringify(failure.reply.body)??'').not.toContain('private');
 });
 test('Resource component requires the owner and is never cacheable',async()=>{
  const f=fixture(async()=>valid),handler=f.routes.get('/api/local/resources/component.js')!,reply:any={headers:{},header(name:string,value:string){this.headers[name]=value;return this},type(value:string){return this.header('content-type',value)},code(status:number){this.status=status;return this},send(body:any){this.body=body;return body}};

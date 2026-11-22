@@ -1,4 +1,4 @@
-# Class 2 validation remains open in 0.3.0-rc.2
+# Class 2 validation remains open in 0.3.0-rc.7
 
 The Class 2 release gate remains open until the packaged workflow is usable and passes as one system. Disabling the feature or proving only that it fails closed does not complete this work.
 

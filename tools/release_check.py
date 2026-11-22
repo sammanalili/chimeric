@@ -27,10 +27,10 @@ REQUIRED_TOOLS = frozenset({
     'build-runtime.ts', 'native-revisions.ts', 'native-process.ts',
     'build-frontend.py', 'brand-frontend.mjs', 'product-branding.ts',
     'brand_product_resources.py', 'generate-atom.mjs',
-    'ui_style.py', 'brand_skill_resources.py', 'bundled_science_skills.py', 'update-style.py', 'build-macos-app.py',
+    'ui_style.py', 'brand_skill_resources.py', 'bundled_science_skills.py', 'update-style.py', 'build-macos-app.py', 'install-macos-app.py',
     'build-portable.py', 'launcher.mjs', 'recover_runtime.py',
     'local_asr.py', 'native_client.py', 'release_check.py',
-    'prepare-release.py', 'scan-release.py', 'scan-allowlist.json', 'native-memory.ts', 'native-session-context.ts', 'native-scope-patches.ts', 'native-execution-policy.ts', 'native-voice-context.ts', 'native-kernel-policy.ts', 'native-runtime-services.ts', 'native-protected-storage.ts', 'native-resource-policy.ts', 'native-browser-policy.ts', 'tailnet-proxy.mjs',
+    'prepare-release.py', 'scan-release.py', 'scan-allowlist.json', 'native-memory.ts', 'native-session-context.ts', 'native-scope-patches.ts', 'native-execution-policy.ts', 'native-voice-context.ts', 'native-upload-context.ts', 'native-kernel-policy.ts', 'native-runtime-services.ts', 'native-protected-storage.ts', 'native-resource-policy.ts', 'native-browser-policy.ts', 'tailnet-proxy.mjs',
     'docker-seccomp.json', 'antigravity-http-bridge/main.go',
     'antigravity-http-bridge/main_test.go', 'antigravity-http-bridge/go.mod',
 })

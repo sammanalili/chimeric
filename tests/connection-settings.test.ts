@@ -338,6 +338,14 @@ test('Anthropic stays unavailable when its backend route is absent, then reports
  const unready=harness('provider-settings.js','AnthropicCredentials',()=>response({installed:true,connected:true,ready:false,detail:'Synthetic unsupported client.'}));await unready.mount();expect(unready.text()).toContain('Sign-in found · connection unavailable');expect(unready.text()).not.toContain('Connected');unready.unmount();
 });
 
+test('Anthropic API starts as a separate Messages connection and never changes the subscription card',async()=>{
+ const ui=harness('provider-settings.js','ModelConnections',()=>response(connectionList()));await ui.mount();
+ await ui.button('Add Anthropic API').props.onClick();ui.render();
+ expect(ui.control('llm-provider-name').props.value).toBe('Anthropic API');expect(ui.control('llm-base-url').props.value).toBe('https://api.anthropic.com');
+ expect(ui.all().some(node=>node.type==='select'&&node.props.value==='anthropic-messages')).toBe(true);
+ expect(ui.text()).toContain('uses API billing separately from Claude Code');ui.unmount();
+});
+
 const quickImages=(extra:any={})=>imagesWithAgy({selected:null,selectedQuickChoice:null,imageModels:[...imagesWithAgy().imageModels,{id:'gpt-image-latest',name:'GPT-Image-Latest',resolvedId:'gpt-image-2',kind:'chatgpt',billing:'subscription'},{id:'nano-banana-latest',name:'Nano-Banana-Latest',resolvedId:'gemini-3.1-flash-image',kind:'antigravity',billing:'subscription'}],quickChoices:[{id:'gpt-image-latest',label:'GPT-Image-Latest',connectionId:'openai-codex',connectionName:'ChatGPT subscription',imageModel:'gpt-image-latest',ready:true,billing:'subscription'},{id:'nano-banana-latest',label:'Nano-Banana-Latest',connectionId:'antigravity-http',connectionName:'Google Antigravity',imageModel:'nano-banana-latest',ready:true,billing:'subscription'}],...extra});
 
 test('composer image aliases save only the server-provided explicit destination and retain unavailable selections',async()=>{

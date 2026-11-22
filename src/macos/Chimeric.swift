@@ -28,7 +28,7 @@ enum ShellError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidSession: return "The local workspace returned an invalid session. Retry opening Chimeric."
-        case .startup: return "The workspace could not start. Check that its two local ports are available. The private workspace folder contains chimeric-launcher.log."
+        case .startup: return "The workspace did not become ready. Chimeric may still be preparing its local environment. The private workspace folder contains chimeric-launcher.log."
         case .arguments: return "Use --profile DIRECTORY and --port PORT to open a separate workspace."
         }
     }
@@ -72,7 +72,11 @@ func helper(_ action: String, arguments: [String], completion: @escaping (Result
             process.standardError = FileHandle.nullDevice
             try process.run()
             let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 90, execute: timeout)
+            // A large existing workspace can take longer than a minute to
+            // build its local security policy. The launcher has its own
+            // bounded readiness check; this guard only prevents a genuinely
+            // wedged helper from living forever.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 210, execute: timeout)
             let data = output.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             timeout.cancel()

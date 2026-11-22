@@ -1,25 +1,33 @@
 import {afterEach,expect,test} from 'bun:test';
 import {writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {ResourceViews} from '../src/resource-views';
 import {artifactFixture} from './helpers/native-artifact-fixture';
 const cleanup:Array<()=>void>=[];afterEach(()=>{for(const done of cleanup.splice(0).reverse())done()});
 function fixture(){const f=artifactFixture();cleanup.push(f.cleanup);return f}
 const signal=()=>new AbortController().signal;
-test('Unbound compatibility never reads bytes and is cut off by protected history',async()=>{
+test('Unbound compatibility never reads bytes and is blocked only in a Class 2 chat',async()=>{
  const f=fixture(),policy=f.store({legacyRule:'ordinary-while-disabled',protectionEnabled:()=>false});let reads=0;const views=new ResourceViews(policy,async()=>{reads++;return new Uint8Array});
- expect(await views.unbound({consumerFrameId:'ordinary'},signal())).toEqual({decision:'standard-unbound',policyRevision:0,consumerRootFrameId:'ordinary'});expect(reads).toBe(0);await policy.captureFrame('protected');expect((await views.unbound({},signal())).decision).toBe('blocked');expect(reads).toBe(0);
+ expect(await views.unbound({consumerFrameId:'ordinary'},signal())).toEqual({decision:'standard-unbound',policyRevision:0,consumerRootFrameId:'ordinary'});expect(reads).toBe(0);await policy.captureFrame('protected');expect((await views.unbound({},signal())).decision).toBe('standard-unbound');expect((await views.unbound({consumerFrameId:'protected'},signal())).decision).toBe('blocked');expect(reads).toBe(0);
 });
 test('Standard verified previews return identity without reading artifact bytes',async()=>{
  const f=fixture(),v=f.add('ordinary'),policy=f.store();await policy.recordCreated(await policy.captureFrame('ordinary'),{versionId:v.versionId});let reads=0;
  const views=new ResourceViews(policy,async()=>{reads++;throw Error('must not read')});
  const result=await views.view({artifactId:v.artifactId,consumerFrameId:'ordinary'},signal());expect(result.decision).toBe('standard');expect(result.artifactId).toBe(v.artifactId);expect(reads).toBe(0);
 });
-test('Protected history closes context-free active previews while the exact owning standard frame still works',async()=>{
+test('Ordinary artifacts still render without a consumer binding after a separate Class 2 session exists',async()=>{
  const f=fixture(),ordinary=f.add('ordinary'),secret=f.add('secret',{root:'protected'}),policy=f.store();
  await policy.recordCreated(await policy.captureFrame('ordinary'),{versionId:ordinary.versionId});await policy.recordCreated(await policy.captureFrame('protected'),{versionId:secret.versionId});let reads=0;
  const views=new ResourceViews(policy,async()=>{reads++;return ordinary.bytes});
- expect((await views.view({versionId:ordinary.versionId},signal())).decision).toBe('blocked');expect(reads).toBe(0);
+ expect((await views.view({versionId:ordinary.versionId},signal())).decision).toBe('standard');expect(reads).toBe(0);
  expect((await views.view({versionId:ordinary.versionId,consumerFrameId:'ordinary'},signal())).decision).toBe('standard');expect(reads).toBe(0);
+ expect((await views.view({versionId:secret.versionId},signal())).decision).toBe('blocked');expect(reads).toBe(0);
+});
+test('An ordinary saved PNG has a checked inline route after separate Class 2 history, but not inside Class 2',async()=>{
+ const f=fixture(),v=f.add('ordinary-png',{type:'image/png'}),bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ZkAAAAASUVORK5CYII=','base64'),checksum=createHash('sha256').update(bytes).digest('hex'),policy=f.store({legacyRule:'ordinary-while-disabled',protectionEnabled:()=>true});
+ writeFileSync(v.absolute,bytes);f.edit('UPDATE artifact_versions SET checksum=?,size_bytes=? WHERE id=?',checksum,bytes.length,v.versionId);await policy.captureFrame('protected');let reads=0;
+ const views=new ResourceViews(policy,async exact=>{reads++;return f.read(exact.storagePath)}),image=await views.image({versionId:v.versionId},signal());
+ expect(image).toEqual({contentType:'image/png',bytes});expect(reads).toBe(1);await expect(views.image({versionId:v.versionId,consumerFrameId:'protected'},signal())).rejects.toThrow('unavailable');
 });
 test('Protected HTML is returned only as inert text with exact source, version and checksum',async()=>{
  const f=fixture(),v=f.add('protected-html',{root:'protected',text:'<img src="https://outside.example/leak">',type:'text/html'}),policy=f.store();await policy.recordCreated(await policy.captureFrame('protected'),{versionId:v.versionId});let options:any;

@@ -3,8 +3,8 @@ import {subscribeProviderEvents} from '/api/local/connections/events.js';
 const t=value=>globalThis.ChimericI18n?.t(value)??value;
 const normalize=value=>typeof value==='string'?value.replace(/^anthropic\//,''):'';
 const number=value=>typeof value==='number'&&Number.isFinite(value)&&value>=0;
-const count=value=>number(value)?value.toLocaleString():t('Unavailable');
-const dollars=value=>number(value)?'$'+value.toLocaleString(undefined,{maximumFractionDigits:4}):t('Unavailable');
+const count=value=>number(value)?value.toLocaleString():'—';
+const dollars=value=>number(value)?'$'+value.toLocaleString(undefined,{maximumFractionDigits:4}):'—';
 const time=value=>{if(typeof value!=='string'&&typeof value!=='number')return '';const date=new Date(value);return Number.isNaN(date.getTime())?'':date.toLocaleString()};
 const timestamp=value=>typeof value==='number'?value:typeof value==='string'?Date.parse(value):NaN;
 let nextId=0;
@@ -94,11 +94,11 @@ export function UsageIndicator({modelId,frameId}={}){
  const windows=Array.isArray(quota?.windows)?quota.windows.filter(window=>number(window.usedPercent)&&window.usedPercent<=100):[];
  const remaining=windows.length?Math.round(100-Math.max(...windows.map(window=>window.usedPercent))):undefined;
  const rawPrice=model?.pricing,price=rawPrice?.currency==='USD'&&number(rawPrice.inputPerMillion)&&number(rawPrice.outputPerMillion)?rawPrice:null;
- let label=t('Unavailable'),mobile='?';
- if(connection?.connected===false){label=t('Disconnected');mobile='?'}
- else if(connection?.subscription&&quota?.status==='available'&&remaining!==undefined){label=remaining+'% '+t('left');mobile=remaining+'%'}
- else if(connection?.subscription&&quota?.status==='stale'){label=t('Quota stale');mobile=t('Stale')}
- else if(!connection?.subscription&&price){mobile=dollars(price.inputPerMillion)+'/'+dollars(price.outputPerMillion);label=mobile+' '+t('per 1M')}
+ let label='—',mobile='—';
+ if(connection?.connected===false){label='⊘';mobile='⊘'}
+ else if(connection?.subscription&&quota?.status==='available'&&remaining!==undefined){label='◔ '+remaining+'%';mobile=label}
+ else if(connection?.subscription&&quota?.status==='stale'){label='◌';mobile='◌'}
+ else if(!connection?.subscription&&price){mobile='↥'+dollars(price.inputPerMillion)+' ↧'+dollars(price.outputPerMillion);label=mobile}
  const row=(name,value)=>jsx.jsxs('div',{className:'flex items-start justify-between gap-3',children:[jsx.jsx('dt',{className:'text-text-400',children:t(name)}),jsx.jsx('dd',{className:'m-0 text-right text-text-100',children:value})]});
  const sourceUrl=typeof price?.sourceUrl==='string'&&/^https?:\/\//i.test(price.sourceUrl)?price.sourceUrl:null;
  const priceSource=({manual:t('Custom prices'),provider:t('Provider metadata'),published:t('Published prices')})[price?.source]??price?.source;
@@ -112,21 +112,13 @@ export function UsageIndicator({modelId,frameId}={}){
    error&&jsx.jsx('span',{role:'status',className:'mb-2 block text-text-400',children:error}),
    typeof snapshot?.warning==='string'&&snapshot.warning&&jsx.jsx('span',{role:'status',className:'mb-2 block text-text-400',children:t(snapshot.warning)}),
    connection?.subscription?jsx.jsxs('span',{className:'mb-3 block space-y-2',children:[
-    jsx.jsx('span',{className:'block font-medium',children:t('Account quota')}),
-    quota?.status==='stale'&&jsx.jsx('span',{className:'block text-text-400',children:t('Last reported quota. It may have changed.')}),
-    quota?.status==='available'||quota?.status==='stale'?windows.length?jsx.jsx('ul',{className:'m-0 list-none space-y-1 p-0',children:windows.map((window,index)=>jsx.jsx('li',{children:window.label+': '+Math.round(100-window.usedPercent)+'% '+t('left')+(time(window.resetAt)?' · '+t('Resets')+' '+time(window.resetAt):'')},index))}):jsx.jsx('span',{className:'block text-text-400',children:t('Unavailable')}):jsx.jsx('span',{className:'block text-text-400',children:t('Account quota is unavailable. Tracked tokens do not reveal your remaining plan allowance.')}),
-    time(quota?.observedAt)&&jsx.jsx('span',{className:'block text-text-400',children:t('Observed')+': '+time(quota.observedAt)}),
-    quota?.source&&jsx.jsx('span',{className:'block break-words text-text-400',children:t('Source')+': '+quota.source}),
+    quota?.status==='available'||quota?.status==='stale'?windows.length?jsx.jsx('ul',{className:'m-0 list-none space-y-1 p-0',children:windows.map((window,index)=>jsx.jsx('li',{children:'◔ '+Math.round(100-window.usedPercent)+'%'+(time(window.resetAt)?' · ◷ '+time(window.resetAt):'')},index))}):jsx.jsx('span',{className:'block text-text-400',children:'—'}):jsx.jsx('span',{className:'block text-text-400',children:'—'}),
    ]}):jsx.jsxs('span',{className:'mb-3 block space-y-2',children:[
-    jsx.jsx('span',{className:'block font-medium',children:t('API prices per 1M tokens')}),
-    price?jsx.jsxs(React.Fragment,{children:[jsx.jsxs('dl',{className:'m-0 space-y-1',children:[row('Input',dollars(price.inputPerMillion)),row('Output',dollars(price.outputPerMillion)),number(price.cacheReadPerMillion)&&row('Cache read',dollars(price.cacheReadPerMillion)),number(price.cacheWritePerMillion)&&row('Cache write',dollars(price.cacheWritePerMillion))]}),jsx.jsx('span',{className:'block break-words text-text-400',children:[t('Source')+': ',sourceUrl?jsx.jsx('a',{href:sourceUrl,target:'_blank',rel:'noopener noreferrer',className:'underline',children:priceSource}):priceSource]}),time(price.checkedAt)&&jsx.jsx('span',{className:'block text-text-400',children:t('Checked')+': '+time(price.checkedAt)}),price.note&&jsx.jsx('span',{className:'block text-text-400',children:price.note})]}):jsx.jsx('span',{className:'block text-text-400',children:t('Model pricing is unavailable. No price has been assumed.')}),
+    price?jsx.jsxs(React.Fragment,{children:[jsx.jsxs('dl',{className:'m-0 space-y-1',children:[row('↥',dollars(price.inputPerMillion)),row('↧',dollars(price.outputPerMillion)),number(price.cacheReadPerMillion)&&row('▣',dollars(price.cacheReadPerMillion)),number(price.cacheWritePerMillion)&&row('▤',dollars(price.cacheWritePerMillion))]}),sourceUrl&&jsx.jsx('a',{href:sourceUrl,target:'_blank',rel:'noopener noreferrer',className:'block underline text-text-400',children:'↗'})]}):jsx.jsx('span',{className:'block text-text-400',children:'—'}),
     model?.qualifiedId&&jsx.jsx(PriceEditor,{model,price,revision:scopedSnapshot?.revision,onSaved:refresh},model.qualifiedId),
    ]}),
    jsx.jsxs('span',{className:'block border-t border-border-300 pt-2',children:[
-    jsx.jsx('span',{className:'mb-2 block font-medium',children:t('Tracked in Chimeric')}),
-    jsx.jsxs('dl',{className:'m-0 space-y-1',children:[row('Model requests',count(tracked?.requests)),row('Input tokens',count(tracked?.input)),row('Output tokens',count(tracked?.output)),row('Cache read tokens',count(tracked?.cacheRead)),row('Cache write tokens',count(tracked?.cacheWrite)),row('Estimated API cost',number(tracked?.estimatedUsd)?dollars(tracked.estimatedUsd):t('Unavailable')),number(tracked?.unpricedRequests)&&tracked.unpricedRequests>0&&row('Requests without prices',count(tracked.unpricedRequests))]}),
-    time(tracked?.startedAt)&&jsx.jsx('span',{className:'mt-2 block text-text-400',children:t('Tracked since')+': '+time(tracked.startedAt)}),
-    jsx.jsx('span',{className:'mt-2 block text-text-400',children:t('These are model requests recorded by Chimeric. They are separate from your account quota and provider bill.')}),
+    jsx.jsxs('dl',{className:'m-0 space-y-1',children:[row('↺',count(tracked?.requests)),row('↥',count(tracked?.input)),row('↧',count(tracked?.output)),row('▣',count(tracked?.cacheRead)),row('▤',count(tracked?.cacheWrite)),row('$',number(tracked?.estimatedUsd)?dollars(tracked.estimatedUsd):'—')]}),
    ]}),
   ]}),
  ]});

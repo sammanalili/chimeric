@@ -346,3 +346,26 @@ API model choices are `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst` and
 `chatgpt-image-latest`. API keys are bound to the exact
 `https://api.openai.com/v1` destination. Subscription credentials are bound to the
 exact Codex image endpoint and cannot be sent to a custom provider URL.
+
+### Reference images use compatible image edits
+
+Compatible API image connections can accept reference images through multipart
+`POST /images/edits`. The `generate_image` tool exposes
+`reference_image_version_ids` only for this route. Supply one to four exact native
+version UUIDs for existing PNG, JPEG or WebP files. Paths and URLs are not accepted.
+The native resource policy must classify each version as standard and permit it
+in the current research chat. Composer uploads must retain that chat's verified
+upload context; generated reference files must belong to the same chat.
+
+The prompt and reference image bytes are sent to the explicitly selected image
+provider. Returned images are validated and saved in Files. Receipts retain the
+reference version IDs and checksums. A replay checks those references again.
+The official OpenAI API, ChatGPT subscription and Antigravity routes currently
+reject reference inputs. A rejected edit never falls back to text-only generation,
+another model or another provider.
+
+A real RiVault reference edit with `black-forest-labs/FLUX.2-klein-9B` was tested
+using a synthetic image on 2026-11-22. That test verifies the image-input route;
+it does not establish protein-structure accuracy. A protein-illustration workflow
+using `black-forest-labs/FLUX.2-dev` is still being checked, so no final protein
+result is claimed here.

@@ -22,6 +22,7 @@ describe('frontend user-visible branding',()=>{
   test('rewrites connector and scratch copy without touching migration commands elsewhere',()=>{
     const file='./web-dist/assets/CapabilitiesPage-D3j7I2By.js';
     expect(brandFrontendUserText('Jobs stage under ${root}/.claude-science/jobs/.',file)).toBe('Jobs stage under ${root}/Chimeric/jobs/.');
+    expect(brandFrontendUserText('Import from ~/.claude-science when you are ready.',file)).toBe('Import from the previous app’s data folder when you are ready.');
     expect(brandFrontendUserText("You're not signed in to claude.ai. Run `claude-science login` to refresh it.",file)).toBe("You're not signed in to the connector service. Refresh it in Settings → Connections.");
     expect(brandFrontendUserText('Import from ~/.claude-science with `claude-science import`.','./other.js')).toBe('Import from ~/.claude-science with `claude-science import`.');
   });

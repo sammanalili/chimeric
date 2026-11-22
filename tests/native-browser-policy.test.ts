@@ -41,7 +41,28 @@ nativeTest('central and direct wrappers defer every native effect/fetch until th
  const arbitrary=compile(files[0],['xo'],{e:jsx,ChimericResourceView:guard}).xo({source:{kind:'url',url:'https://remote.invalid/a.html'},artifact:{id:'artifact-a'}});expect(arbitrary.props.allowUnboundStandard).toBe(false);
  const file=compile(files[0],['xo'],{e:jsx,ChimericResourceView:guard}).xo({source:{kind:'url',url:'/api/compute/local/download?path=x'},chimericAllowUnboundStandard:true,bindings:{chimericConsumerFrameId:'child-b'},artifact:{id:'artifact-a'}});expect(file.props).toMatchObject({allowUnboundStandard:true,consumerFrameId:'child-b'});expect(file.props.artifactId).toBeUndefined();expect(file.props.versionId).toBeUndefined();
  for(const [file,name,runtime]of [[files[1],'bt','o'],[files[1],'gt','o'],[files[3],'ae','w'],[files[4],'v','r']] as const){const result=compile(file,[name],{[runtime]:jsx,ChimericResourceView:guard})[name]({artifactId:'artifact-a',versionId:'version-a'});expect(result.type).toBe(guard);if(name==='ae'||name==='v')expect(result.props.kind).toBe('mcp')}
- for(const [name,protectedName]of [['Pzt','ChimericStandardOnly'],['ha','ChimericMarkdown']] as const){const result=compile(files[2],[name],{a:jsx,[protectedName]:guard})[name]({content:'![image](https://remote.invalid)'});expect(result.type).toBe(guard)}
+ const remoteImage=compile(files[2],['Pzt'],{a:jsx,ChimericStandardOnly:guard}).Pzt({src:'https://remote.invalid/image.png'});expect(remoteImage.type).toBe(guard);
+});
+nativeTest('ordinary conversation Markdown retains the native formatter and complete long messages without an artifact-preview lease',()=>{
+ const jsx={jsx:(type:any,props:any)=>({type,props})},native=()=>{},guard=()=>{};
+ const {ha}=compile(files[2],['ha'],{a:jsx,ChimericNativeMarkdown:native,ChimericMarkdown:guard});
+ const content='# Heading\n\n**Bold** and *italic* with `inline code`.\n\n- First\n- Second\n\n'+('Long user message line.\n'.repeat(1200));
+ for(const extra of [{},{variant:'chat'},{variant:'chat',streaming:true,breaks:true}]){
+  const rendered=ha({content,...extra,remoteImagePolicy:'allow'});
+  expect(rendered.type).toBe(native);expect(rendered.props.content).toBe(content);
+  expect(rendered.props.remoteImagePolicy).toBe('allowlist');
+  expect(rendered.props.style?.maxHeight).toBeUndefined();expect(rendered.props.streaming).toBe((extra as any).streaming);
+ }
+ const image=compile(files[2],['Pzt'],{a:jsx,ChimericStandardOnly:guard}).Pzt({src:'https://remote.invalid/a.png'});expect(image.type).toBe(guard);
+});
+nativeTest('artifact Markdown previews and unknown variants retain the strict resource gate',()=>{
+ const jsx={jsx:(type:any,props:any)=>({type,props})},native=()=>{},guard=()=>{},content='![remote](https://remote.invalid/image.png)';
+ const {ha}=compile(files[2],['ha'],{a:jsx,ChimericNativeMarkdown:native,ChimericMarkdown:guard});
+ for(const variant of ['document','future-resource',null]){
+  const rendered=ha({content,variant});expect(rendered.type).toBe(guard);expect(rendered.props.content).toBe(content);
+  const standard=rendered.props.renderStandard();expect(standard.type).toBe(native);expect(standard.props.variant).toBe(variant);
+ }
+ for(const file of ['MarkdownPreview-CVfo5DoK.js','EditableMarkdownPreview-BrhpBuul.js'])expect(fixture(file).original).toContain('variant:"document"');
 });
 nativeTest('direct HTML cache/fetch/create/acquire calls reject missing or forged bindings before DOM or byte access',()=>{
  const p=policy();let io=0;const globals={ChimericAssertResource:p.assertNativeResourceLease,ChimericResourceKey:p.nativeResourceLeaseKey,P:new Map,H:{getVersionAsTextBounded(){io++;throw Error('No bytes')}},document:{createElement(){io++;throw Error('No DOM')}},k:new Map};

@@ -42,11 +42,13 @@ export function claudeCodeEnvironment(home?:string){
 }
 export function findClaudeCodeExecutable(){
  const name=process.platform==='win32'?'claude.exe':'claude';
+ // The user-local official installer is updated independently of package
+ // managers. Prefer it before a stale Homebrew or PATH shim.
+ for(const path of [join(homedir(),'.local','bin',name),'/opt/homebrew/bin/claude','/usr/local/bin/claude'])if(existsSync(path))return path;
  for(const directory of (process.env.PATH??'').split(process.platform==='win32'?';':':')){
   if(!directory||!isAbsolute(directory))continue;
   const path=join(directory,name);if(existsSync(path))return path;
  }
- for(const path of [join(homedir(),'.local','bin',name),'/opt/homebrew/bin/claude','/usr/local/bin/claude'])if(existsSync(path))return path;
  return '';
 }
 export function inspectClaudeCodeExecutable(options:ClaudeCodeProviderOptions={}){
@@ -188,7 +190,7 @@ export class ClaudeCodeModelProvider{
    if(this.closed)throw new ClaudeCodeError('The official-client connection is closed.',409);signal.throwIfAborted();
    const spec=requestSpec(model,context,options);
    const perform=async()=>{
-    const authenticated=await runClaudeCodeCommand(this.options,[...claudeCodeSafetyFlags(),'auth','status'],undefined,signal,30000);
+    const authenticated=await runClaudeCodeCommand(this.options,['auth','status','--json'],undefined,signal,30000);
     let identity:any;try{identity=JSON.parse(authenticated.stdout)}catch{throw new ClaudeCodeError('The official client could not confirm subscription authentication. Check its sign-in again.',409)}
     if(authenticated.code!==0||identity?.loggedIn!==true||identity?.authMethod!=='claude.ai')throw new ClaudeCodeError('The official client is not using a verified Claude subscription sign-in. No model request was sent.',409);
     const args=[...claudeCodeSafetyFlags(),'--print','--input-format','stream-json','--output-format','stream-json','--verbose','--tools','','--disable-slash-commands','--no-session-persistence','--max-turns','4','--model',model.id,'--json-schema',JSON.stringify(spec.schema)];

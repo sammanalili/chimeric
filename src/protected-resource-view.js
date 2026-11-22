@@ -7,7 +7,7 @@ const idPattern=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/,checksumPattern=/^[a-f0-9]
 const MAX_JSON=6*1024*1024,MAX_TEXT=256*1024,MAX_IMAGE=4*1024*1024,LEASE_MS=15000;
 let serial=0;
 const t=value=>globalThis.ChimericI18n?.t?.(value)??value;
-const blocked=reason=>Object.freeze({decision:'blocked',reason:reason||'This preview is unavailable until its source and confidentiality policy are verified.'});
+const blocked=reason=>Object.freeze({decision:'blocked',reason:reason||'This file cannot open in the selected chat.'});
 const validId=value=>typeof value==='string'&&idPattern.test(value);
 const bytes=value=>new TextEncoder().encode(value).length;
 function lookupOf(props){

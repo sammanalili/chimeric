@@ -27,63 +27,63 @@ const tracked={requests:4,input:12000,output:3000,cacheRead:4000,cacheWrite:0,es
 const subscription=(extra:any={})=>({id:'sub',name:'Synthetic plan',subscription:true,connected:true,quota:{status:'available',modelId:'sub::model',windows:[{label:'Short window',usedPercent:20},{label:'Weekly',usedPercent:90,resetAt:Date.parse('2026-11-21T00:00:00Z')}],observedAt:Date.parse('2026-11-20T01:00:00Z'),source:'Synthetic cached account report'},models:[{id:'model',qualifiedId:'sub::model',name:'Synthetic model',pricing:null}],tracked,...extra});
 const apiConnection=(extra:any={})=>({id:'api',name:'Synthetic API',subscription:false,connected:true,quota:{status:'unavailable',windows:[]},models:[{id:'api-model',qualifiedId:'api::api-model',name:'Synthetic API model',pricing:{currency:'USD',inputPerMillion:1.5,outputPerMillion:6,cacheReadPerMillion:0.2,source:'Synthetic provider docs',sourceUrl:'https://docs.example.invalid/pricing',checkedAt:'2026-11-20T00:00:00Z'}}],tracked:{...tracked,estimatedUsd:0.036,unpricedRequests:0},...extra});
 
-test('compact quota uses the tightest reported window and keeps Chimeric token counts separate from account allowance',async()=>{
- const ui=fixture(()=>response({selectedModel:'sub::model',connections:[subscription()]}));await ui.mount();expect(ui.trigger().props['aria-label']).toBe('Model usage and pricing: 10% left');expect(ui.all().some(node=>node.props.role==='region')).toBe(false);ui.open();expect(ui.text()).toContain('Short window: 80% left');expect(ui.text()).toContain('Weekly: 10% left');expect(ui.text()).toContain('Account quota');expect(ui.text()).toContain('Tracked in Chimeric');expect(ui.text()).toContain('separate from your account quota and provider bill');expect(ui.text()).toContain('12,000');expect(ui.requests.every(entry=>entry.url==='/api/local/usage'&&entry.options.credentials==='same-origin')).toBe(true);ui.unmount();
+test('compact quota uses symbols, the tightest reported window, and keeps local token counts distinct',async()=>{
+ const ui=fixture(()=>response({selectedModel:'sub::model',connections:[subscription()]}));await ui.mount();expect(ui.trigger().props['aria-label']).toBe('Model usage and pricing: ◔ 10%');expect(ui.all().some(node=>node.props.role==='region')).toBe(false);ui.open();expect(ui.text()).toContain('◔ 80%');expect(ui.text()).toContain('◔ 10%');expect(ui.text()).toContain('↥ 12,000');expect(ui.requests.every(entry=>entry.url==='/api/local/usage'&&entry.options.credentials==='same-origin')).toBe(true);ui.unmount();
 });
 
 test('API price summary uses the selected model input/output rates and shows their source in the detail popover',async()=>{
- const ui=fixture(()=>response({selectedModel:'api::api-model',connections:[apiConnection()]}));await ui.mount();expect(ui.trigger().props['aria-label']).toContain('$1.5/$6 per 1M');ui.open();expect(ui.text()).toContain('API prices per 1M tokens');expect(ui.text()).toContain('Input');expect(ui.text()).toContain('Output');expect(ui.find(node=>node.type==='a').props.href).toBe('https://docs.example.invalid/pricing');expect(ui.text()).toContain('$0.036');expect(ui.all().some(node=>node.type==='span'&&node.props.className==='md:hidden')).toBe(true);ui.unmount();
+ const ui=fixture(()=>response({selectedModel:'api::api-model',connections:[apiConnection()]}));await ui.mount();expect(ui.trigger().props['aria-label']).toContain('↥$1.5 ↧$6');ui.open();expect(ui.text()).toContain('↥ $1.5');expect(ui.text()).toContain('↧ $6');expect(ui.find(node=>node.type==='a').props.href).toBe('https://docs.example.invalid/pricing');expect(ui.text()).toContain('$0.036');expect(ui.all().some(node=>node.type==='span'&&node.props.className==='md:hidden')).toBe(true);ui.unmount();
 });
 test('protected chat pricing follows its server-verified effective model and never another frame snapshot',async()=>{
  let frame='protected';const ui=fixture(()=>response({frameId:frame,effectiveModelId:'api::api-model',selectedModel:'sub::model',connections:[subscription(),apiConnection()]}),{modelId:'sub::model',frameId:'protected'});
- await ui.mount();expect(ui.requests[0].url).toBe('/api/local/usage?frameId=protected');expect(ui.trigger().props['aria-label']).toContain('$1.5/$6');ui.open();expect(ui.text()).toContain('Synthetic API model');
- ui.render({modelId:'sub::model',frameId:'other'});expect(ui.trigger().props['aria-label']).toContain('Unavailable');await settle();ui.render();expect(ui.trigger().props['aria-label']).toContain('Unavailable');
- frame='other';await ui.event();expect(ui.trigger().props['aria-label']).toContain('$1.5/$6');ui.unmount();
+ await ui.mount();expect(ui.requests[0].url).toBe('/api/local/usage?frameId=protected');expect(ui.trigger().props['aria-label']).toContain('↥$1.5 ↧$6');ui.open();expect(ui.text()).toContain('Synthetic API model');
+ ui.render({modelId:'sub::model',frameId:'other'});expect(ui.trigger().props['aria-label']).toContain('—');await settle();ui.render();expect(ui.trigger().props['aria-label']).toContain('—');
+ frame='other';await ui.event();expect(ui.trigger().props['aria-label']).toContain('↥$1.5 ↧$6');ui.unmount();
 });
 
 test('unknown prices and unavailable quota remain unknown even when tracked token counts are large',async()=>{
  for(const connection of [subscription({quota:{status:'unavailable',windows:[]},tracked:{...tracked,input:90000000}}),apiConnection({models:[{id:'api-model',qualifiedId:'api::api-model',name:'Unpriced model',pricing:null}],tracked:{...tracked,estimatedUsd:null}})]){
-  const ui=fixture(()=>response({selectedModel:connection.models[0].qualifiedId,connections:[connection]}));await ui.mount();expect(ui.trigger().props['aria-label']).toBe('Model usage and pricing: Unavailable');ui.open();expect(ui.text()).not.toContain('$0');expect(ui.text()).toContain(connection.subscription?'Tracked tokens do not reveal':'No price has been assumed');ui.unmount();
+  const ui=fixture(()=>response({selectedModel:connection.models[0].qualifiedId,connections:[connection]}));await ui.mount();expect(ui.trigger().props['aria-label']).toBe('Model usage and pricing: —');ui.open();expect(ui.text()).not.toContain('$0');expect(ui.text()).toContain('—');ui.unmount();
  }
 });
 
 test('stale and disconnected account states never present a fresh quota percentage',async()=>{
- let connection=subscription();const ui=fixture(()=>response({selectedModel:'sub::model',connections:[connection]}));await ui.mount();connection=subscription({quota:{status:'stale',modelId:'sub::model',windows:[{label:'Last window',usedPercent:10}]}});await ui.event();expect(ui.trigger().props['aria-label']).toContain('Quota stale');ui.open();expect(ui.text()).toContain('Last reported quota. It may have changed.');connection=subscription({connected:false});await ui.event();expect(ui.trigger().props['aria-label']).toContain('Disconnected');ui.unmount();
+ let connection=subscription();const ui=fixture(()=>response({selectedModel:'sub::model',connections:[connection]}));await ui.mount();connection=subscription({quota:{status:'stale',modelId:'sub::model',windows:[{label:'Last window',usedPercent:10}]}});await ui.event();expect(ui.trigger().props['aria-label']).toContain('◌');ui.open();expect(ui.text()).toContain('◔ 90%');connection=subscription({connected:false});await ui.event();expect(ui.trigger().props['aria-label']).toContain('⊘');ui.unmount();
 });
 
 test('actual composer model changes, visibility and service events refresh only the local usage snapshot',async()=>{
- const ui=fixture(()=>response({selectedModel:'sub::model',connections:[subscription(),apiConnection()]}),{modelId:'anthropic/api::api-model'});await ui.mount();expect(ui.trigger().props['aria-label']).toContain('$1.5/$6');const initial=ui.requests.length;
- ui.render({modelId:'sub::model'});await settle();ui.render();expect(ui.trigger().props['aria-label']).toContain('10% left');expect(ui.requests.length).toBe(initial+1);const beforeHidden=ui.requests.length;await ui.visibility('hidden');expect(ui.requests.length).toBe(beforeHidden);await ui.visibility('visible');expect(ui.requests.length).toBe(beforeHidden+1);await ui.event();expect(ui.requests.length).toBe(beforeHidden+2);expect(ui.requests.every(entry=>entry.url==='/api/local/usage'&&!entry.options.method)).toBe(true);ui.unmount();expect(ui.sources.every(source=>source.closed)).toBe(true);expect([...ui.documentListeners.values(),...ui.windowListeners.values()].every(listeners=>listeners.size===0)).toBe(true);
+ const ui=fixture(()=>response({selectedModel:'sub::model',connections:[subscription(),apiConnection()]}),{modelId:'anthropic/api::api-model'});await ui.mount();expect(ui.trigger().props['aria-label']).toContain('↥$1.5 ↧$6');const initial=ui.requests.length;
+ ui.render({modelId:'sub::model'});await settle();ui.render();expect(ui.trigger().props['aria-label']).toContain('◔ 10%');expect(ui.requests.length).toBe(initial+1);const beforeHidden=ui.requests.length;await ui.visibility('hidden');expect(ui.requests.length).toBe(beforeHidden);await ui.visibility('visible');expect(ui.requests.length).toBe(beforeHidden+1);await ui.event();expect(ui.requests.length).toBe(beforeHidden+2);expect(ui.requests.every(entry=>entry.url==='/api/local/usage'&&!entry.options.method)).toBe(true);ui.unmount();expect(ui.sources.every(source=>source.closed)).toBe(true);expect([...ui.documentListeners.values(),...ui.windowListeners.values()].every(listeners=>listeners.size===0)).toBe(true);
 });
 
 test('usage popover supports focus, tap, Escape and safe source links',async()=>{
  const connection=apiConnection();connection.models[0].pricing.sourceUrl='javascript:alert(1)';const ui=fixture(()=>response({selectedModel:'api::api-model',connections:[connection]}));await ui.mount();ui.trigger().props.onFocus();ui.render();expect(ui.trigger().props['aria-expanded']).toBe(true);ui.trigger().props.onClick();ui.render();expect(ui.trigger().props['aria-expanded']).toBe(true);ui.trigger().props.onClick();ui.render();expect(ui.trigger().props['aria-expanded']).toBe(false);ui.open();ui.find(node=>node.props['data-testid']==='usage-indicator').props.onKeyDown({key:'Escape'});ui.render();expect(ui.trigger().props['aria-expanded']).toBe(false);ui.open();expect(ui.all().some(node=>node.type==='a')).toBe(false);expect(ui.all().some(node=>node.props.dangerouslySetInnerHTML)).toBe(false);ui.unmount();
 });
 
-test('Japanese usage details distinguish account quota and locally tracked model requests',async()=>{
- const translations=JSON.parse(readFileSync(new URL('../src/ja.json',import.meta.url),'utf8'));const ui=fixture(()=>response({selectedModel:'sub::model',connections:[subscription()]}),{},translations);await ui.mount();ui.open();expect(ui.text()).toContain('アカウントの利用枠');expect(ui.text()).toContain('Chimeric で記録した利用量');expect(ui.text()).toContain('サービス側の請求額とは別の情報');ui.unmount();
+test('Japanese compact usage preserves numeric symbols without verbose copy',async()=>{
+ const translations=JSON.parse(readFileSync(new URL('../src/ja.json',import.meta.url),'utf8'));const ui=fixture(()=>response({selectedModel:'sub::model',connections:[subscription()]}),{},translations);await ui.mount();ui.open();expect(ui.text()).toContain('◔ 10%');expect(ui.text()).toContain('↥ 12,000');ui.unmount();
 });
 
 test('quota without the exact selected model binding never supplies an allowance or starts a timer',async()=>{
  for(const modelId of [undefined,'sub::different-model','model']){
   const connection=subscription();connection.quota.modelId=modelId;
   const ui=fixture(()=>response({selectedModel:'sub::model',connections:[connection]}));await ui.mount();
-  expect(ui.trigger().props['aria-label']).toBe('Model usage and pricing: Unavailable');expect(ui.pendingTimers()).toHaveLength(0);
-  ui.open();expect(ui.text()).not.toContain('Short window: 80% left');expect(ui.text()).not.toContain('Synthetic cached account report');expect(ui.text()).toContain('Tracked in Chimeric');ui.unmount();
+  expect(ui.trigger().props['aria-label']).toBe('Model usage and pricing: —');expect(ui.pendingTimers()).toHaveLength(0);
+  ui.open();expect(ui.text()).not.toContain('◔ 80%');expect(ui.text()).not.toContain('Synthetic cached account report');expect(ui.text()).toContain('↺');ui.unmount();
  }
  const connection=subscription();connection.models.push({id:'another',qualifiedId:'sub::another',name:'Another model',pricing:null});
  const ui=fixture(()=>response({selectedModel:'sub::model',connections:[connection]}),{modelId:'sub::another'});await ui.mount();
- expect(ui.trigger().props['aria-label']).toBe('Model usage and pricing: Unavailable');expect(ui.pendingTimers()).toHaveLength(0);
- ui.render({modelId:'anthropic/sub::model'});await settle();ui.render();expect(ui.trigger().props['aria-label']).toContain('10% left');expect(ui.pendingTimers()).toHaveLength(1);ui.unmount();
+ expect(ui.trigger().props['aria-label']).toBe('Model usage and pricing: —');expect(ui.pendingTimers()).toHaveLength(0);
+ ui.render({modelId:'anthropic/sub::model'});await settle();ui.render();expect(ui.trigger().props['aria-label']).toContain('◔ 10%');expect(ui.pendingTimers()).toHaveLength(1);ui.unmount();
 });
 
 test('a five-minute observation deadline refreshes local usage once and marks repeated available snapshots stale',async()=>{
  // Return new objects on every request, as a real JSON response does.
  const ui=fixture(()=>response({selectedModel:'sub::model',connections:[subscription()]}));await ui.mount();
  expect(ui.pendingTimers()).toEqual([ui.now()+300010]);
- await ui.advance(299999);expect(ui.trigger().props['aria-label']).toContain('10% left');expect(ui.requests).toHaveLength(1);
- await ui.advance(11);expect(ui.requests).toHaveLength(2);expect(ui.trigger().props['aria-label']).toContain('Quota stale');expect(ui.pendingTimers()).toHaveLength(0);
- ui.open();expect(ui.text()).toContain('Last reported quota. It may have changed.');
+ await ui.advance(299999);expect(ui.trigger().props['aria-label']).toContain('◔ 10%');expect(ui.requests).toHaveLength(1);
+ await ui.advance(11);expect(ui.requests).toHaveLength(2);expect(ui.trigger().props['aria-label']).toContain('◌');expect(ui.pendingTimers()).toHaveLength(0);
+ ui.open();expect(ui.text()).toContain('◔ 10%');
  await ui.advance(86400000);expect(ui.requests).toHaveLength(2);expect(ui.pendingTimers()).toHaveLength(0);
  expect(ui.requests.every(entry=>entry.url==='/api/local/usage'&&entry.options.credentials==='same-origin')).toBe(true);ui.unmount();
 });
@@ -92,16 +92,16 @@ test('the earliest reset uses millisecond timestamps and cannot loop when the se
  const base=Date.parse('2026-11-20T01:00:00Z'),resetAt=base+60000;let observedAt=base;
  const ui=fixture(()=>{const connection=subscription();connection.quota.observedAt=observedAt;connection.quota.windows=[{label:'Resets first',usedPercent:90,resetAt},{label:'Resets later',usedPercent:20,resetAt:base+120000}];return response({selectedModel:'sub::model',connections:[connection]})});
  await ui.mount();expect(ui.pendingTimers()).toEqual([resetAt+10]);await ui.advance(59999);expect(ui.requests).toHaveLength(1);
- observedAt=base+60010;await ui.advance(11);expect(ui.requests).toHaveLength(2);expect(ui.trigger().props['aria-label']).toContain('Quota stale');expect(ui.pendingTimers()).toHaveLength(0);
+ observedAt=base+60010;await ui.advance(11);expect(ui.requests).toHaveLength(2);expect(ui.trigger().props['aria-label']).toContain('◌');expect(ui.pendingTimers()).toHaveLength(0);
  await ui.advance(300000);expect(ui.requests).toHaveLength(2);ui.unmount();
 });
 
 test('already expired reports refresh once, and a genuinely newer observation can schedule its own later refresh',async()=>{
  const base=Date.parse('2026-11-20T01:00:00Z');let observedAt=base-400000;
  const ui=fixture(()=>{const connection=subscription();connection.quota.observedAt=observedAt;return response({selectedModel:'sub::model',connections:[connection]})});
- await ui.mount();expect(ui.trigger().props['aria-label']).toContain('Quota stale');await ui.advance(0);expect(ui.requests).toHaveLength(2);expect(ui.pendingTimers()).toHaveLength(0);
- observedAt=ui.now();await ui.event();expect(ui.requests).toHaveLength(3);expect(ui.trigger().props['aria-label']).toContain('10% left');expect(ui.pendingTimers()).toEqual([observedAt+300010]);
- await ui.advance(300010);expect(ui.requests).toHaveLength(4);expect(ui.trigger().props['aria-label']).toContain('Quota stale');expect(ui.pendingTimers()).toHaveLength(0);ui.unmount();
+ await ui.mount();expect(ui.trigger().props['aria-label']).toContain('◌');await ui.advance(0);expect(ui.requests).toHaveLength(2);expect(ui.pendingTimers()).toHaveLength(0);
+ observedAt=ui.now();await ui.event();expect(ui.requests).toHaveLength(3);expect(ui.trigger().props['aria-label']).toContain('◔ 10%');expect(ui.pendingTimers()).toEqual([observedAt+300010]);
+ await ui.advance(300010);expect(ui.requests).toHaveLength(4);expect(ui.trigger().props['aria-label']).toContain('◌');expect(ui.pendingTimers()).toHaveLength(0);ui.unmount();
 });
 
 test('model changes and unmount cancel pending deadlines without background provider polling',async()=>{
@@ -112,7 +112,7 @@ test('model changes and unmount cancel pending deadlines without background prov
 
 test('a far-future corrupt observation cannot overflow a browser timer into rapid requests',async()=>{
  const connection=subscription();connection.quota.observedAt=Date.parse('2099-01-01T00:00:00Z');connection.quota.windows=[{label:'Future report',usedPercent:20}];
- const ui=fixture(()=>response({selectedModel:'sub::model',connections:[connection]}));await ui.mount();expect(ui.trigger().props['aria-label']).toContain('Quota stale');expect(ui.pendingTimers()).toHaveLength(0);await ui.advance(600000);expect(ui.requests).toHaveLength(1);ui.unmount();
+ const ui=fixture(()=>response({selectedModel:'sub::model',connections:[connection]}));await ui.mount();expect(ui.trigger().props['aria-label']).toContain('◌');expect(ui.pendingTimers()).toHaveLength(0);await ui.advance(600000);expect(ui.requests).toHaveLength(1);ui.unmount();
 });
 
 test('local accounting warnings remain visible as plain text in the details popover',async()=>{

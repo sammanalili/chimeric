@@ -5,7 +5,7 @@ const base='/api/local/image-generation';
 const control='w-full min-w-0 rounded-md border border-border-300 bg-bg-000 px-3 py-2 text-sm text-text-100';
 const buttonClass='rounded-md border border-border-300 px-3 py-1.5 text-sm hover:bg-bg-200 disabled:opacity-50 focus-visible:shadow-focus';
 const kindOf=value=>value?.kind??(value?.billing==='subscription'?'chatgpt':value?.billing==='api'?'openai-api':undefined);
-const matchesProvider=(model,provider)=>!!provider&&kindOf(model)===kindOf(provider);
+const matchesProvider=(model,provider)=>!!provider&&kindOf(model)===kindOf(provider)&&(!model.connectionId||model.connectionId===provider.id);
 const planLabel=provider=>kindOf(provider)==='antigravity'?'Google AI plan limits':kindOf(provider)==='chatgpt'?'ChatGPT plan limits':'API billing';
 const settingsEvent='chimeric-image-generation-settings';
 const publish=value=>{if(globalThis.dispatchEvent&&globalThis.CustomEvent)globalThis.dispatchEvent(new globalThis.CustomEvent(settingsEvent,{detail:value}))};
@@ -103,13 +103,13 @@ export function ImageGenerationChoice({compact=false}={}){
   try{const value=await api('PUT',{expectedRevision:snapshot.revision,connectionId:choice?.connectionId??null,...choice?{imageModel:choice.imageModel}:{}});if(live.current){update(value);publish(value);client.invalidateQueries()}}
   catch(e){if(live.current)setError(e.message);await refresh()}finally{mutating.current=false;if(live.current)setBusy(false)}
  };
- const choices=status?.quickChoices??[],selected=choices.find(value=>value.id===status?.selectedQuickChoice);
+ const choices=status?.quickChoices??[],selected=choices.find(value=>value.id===status?.selectedQuickChoice)??status?.selectedChoice;
  const value=status?.selectedQuickChoice??(status?.selected?'configured':'');
  const provider=selected&&status?.providers?.find(provider=>provider.id===selected.connectionId);
  return jsx.jsxs('div',{className:compact?'px-3 py-2':'mb-3 rounded-lg border border-border-300 p-3','data-testid':compact?'composer-image-choice':'image-quick-choice',onKeyDown:event=>event.stopPropagation(),children:[
   jsx.jsxs('label',{className:'block text-sm',children:[jsx.jsx('span',{className:'mb-1 block text-text-400',children:t('Image generation')}),jsx.jsxs('select',{className:control,value,disabled:busy||!status,onChange:event=>choose(event.target.value),'aria-label':t('Image generation'),'data-testid':'image-quick-select',children:[
    jsx.jsx('option',{value:'',children:t('Off')}),
-   value==='configured'&&jsx.jsx('option',{value:'configured',disabled:true,children:t('Configured image model')}),
+   value==='configured'&&jsx.jsx('option',{value:'configured',disabled:true,children:selected?.label??t('Configured image model')}),
    ...choices.map(choice=>jsx.jsx('option',{value:choice.id,disabled:!choice.ready,children:choice.label+(choice.ready?'':' · '+t('Unavailable'))},choice.id)),
   ]})]}),
   selected&&jsx.jsx('p',{role:'status',className:'mt-2 text-footnote text-text-400',children:(selected.connectionName??provider?.name??'')+' · '+t(selected.billing==='api'?'API billing':planLabel(provider??{kind:selected.id==='nano-banana-latest'?'antigravity':'chatgpt'}))}),

@@ -73,7 +73,11 @@ export function nativeBrowserPolicyEdits(ast:t.Node,source:string,fileName:strin
   const markdown=checked(source,only(all(ast,(node):node is t.VariableDeclarator=>t.isVariableDeclarator(node)&&t.isIdentifier(node.id,{name:'ha'})),'ha'),'ha');
   replace(markdown.id,'ChimericNativeMarkdown','protected-markdown-original');
   const declaration=only(all(ast,(node):node is t.VariableDeclaration=>t.isVariableDeclaration(node)&&node.declarations.includes(markdown)),'ha declaration');
-  add(declaration.end!,'\nfunction ha(chimericProps){return a.jsx(ChimericMarkdown,{content:chimericProps.content,renderStandard:()=>a.jsx(ChimericNativeMarkdown,chimericProps)})}\n','protected-markdown-dispatch');
+  // Conversation formatting has no artifact lease. Only document previews
+  // enter the resource renderer; their native callers explicitly set variant.
+  // Keep unknown future variants gated and retain the separate remote-image
+  // guard even if a conversation caller asks for the permissive image mode.
+  add(declaration.end!,'\nfunction ha(chimericProps){if(chimericProps.variant===void 0||chimericProps.variant==="chat")return a.jsx(ChimericNativeMarkdown,{...chimericProps,remoteImagePolicy:"allowlist"});return a.jsx(ChimericMarkdown,{content:chimericProps.content,renderStandard:()=>a.jsx(ChimericNativeMarkdown,chimericProps)})}\n','protected-markdown-dispatch');
   const mount=fn(ast,source,'kan');replace(mount.body,'{throw new Error("Interactive connector previews require a verified server-owned widget binding.")}','protected-mcp-pool-acquire');
   const release=fn(ast,source,'Tse');replace(release.body,'{const chimericEntry=QS.get(e);if(chimericEntry){if(chimericEntry.reaper)clearTimeout(chimericEntry.reaper);chimericEntry.destroy()}}','protected-mcp-immediate-destroy');
   const method=checked(source,only(all(ast,(node):node is t.ObjectMethod|t.ClassMethod=>(t.isObjectMethod(node)||t.isClassMethod(node))&&t.isIdentifier(node.key,{name:'getVersionAsTextBounded'})),'bounded version API'),'getVersionAsTextBounded');

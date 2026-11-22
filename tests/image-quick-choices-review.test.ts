@@ -27,17 +27,17 @@ function fixture(){
  return {manager,registry,apiCalls,googleCalls,host,disconnectChat:()=>{chatConnected=false},disconnectGoogle:()=>{googleConnected=false},catalog:(next:typeof catalog)=>{catalog=next}};
 }
 
-test('A disconnected GPT subscription quick choice never silently chooses a ready paid API',()=>{
- const f=fixture();f.disconnectChat();const snapshot=f.manager.snapshot(),gpt=snapshot.quickChoices.find(choice=>choice.id==='gpt-image-latest')!;
- expect(snapshot.providers.find(p=>p.id==='paid')?.ready).toBe(true);expect(gpt).toMatchObject({connectionId:'chat',billing:'subscription',imageModel:OPENAI_SUBSCRIPTION_IMAGE_MODEL,ready:false});
- expect(()=>f.manager.configure({expectedRevision:0,connectionId:gpt.connectionId,imageModel:gpt.imageModel})).toThrow('ready image-generation');
+test('A disconnected ChatGPT image model never silently chooses a ready paid API',()=>{
+ const f=fixture();f.disconnectChat();const snapshot=f.manager.snapshot(),chat=snapshot.quickChoices.find(choice=>choice.connectionId==='chat'&&choice.imageModel===OPENAI_SUBSCRIPTION_IMAGE_MODEL)!;
+ expect(snapshot.providers.find(p=>p.id==='paid')?.ready).toBe(true);expect(chat).toMatchObject({connectionId:'chat',billing:'subscription',imageModel:OPENAI_SUBSCRIPTION_IMAGE_MODEL,ready:false,label:'ChatGPT subscription · GPT Image 2'});
+ expect(()=>f.manager.configure({expectedRevision:0,connectionId:chat.connectionId,imageModel:chat.imageModel})).toThrow('ready image-generation');
  expect(f.manager.snapshot().selected).toBeNull();expect(f.apiCalls).toHaveLength(0);
 });
 
-test('An explicitly selected API remains visibly API-billed and never falls back to ChatGPT on outage',async()=>{
+test('An explicitly selected API model remains visibly API-billed and never falls back to ChatGPT on outage',async()=>{
  const f=fixture();f.manager.configure({expectedRevision:0,connectionId:'paid',imageModel:OPENAI_IMAGE_MODELS[0]});f.registry.statuses.paid.ready=false;
- const snapshot=f.manager.snapshot(),gpt=snapshot.quickChoices.find(choice=>choice.id==='gpt-image-latest')!;
- expect(gpt).toMatchObject({connectionId:'paid',billing:'api',imageModel:OPENAI_IMAGE_MODELS[0],ready:false});expect(snapshot.providers.find(p=>p.id==='chat')?.ready).toBe(true);
+ const snapshot=f.manager.snapshot(),choice=snapshot.quickChoices.find(choice=>choice.connectionId==='paid'&&choice.imageModel===OPENAI_IMAGE_MODELS[0])!;
+ expect(choice).toMatchObject({connectionId:'paid',billing:'api',imageModel:OPENAI_IMAGE_MODELS[0],ready:false,label:'Synthetic API · '+OPENAI_IMAGE_MODELS[0]});expect(snapshot.providers.find(p=>p.id==='chat')?.ready).toBe(true);
  expect(await f.manager.execute(f.host,{id:'synthetic-image-request'},{prompt:'Synthetic red square'})).toMatchObject({status:'error'});
  expect(f.manager.snapshot().selected).toEqual({connectionId:'paid',imageModel:OPENAI_IMAGE_MODELS[0]});expect(f.apiCalls).toHaveLength(0);
 });
@@ -47,12 +47,12 @@ test('Google generation failure keeps the exact subscription selection and perfo
  expect(await f.manager.execute(f.host,{id:'synthetic-google-request'},{prompt:'Synthetic blue circle'})).toMatchObject({status:'error',error:'Synthetic Google quota failure'});
  expect(f.googleCalls).toHaveLength(1);expect(f.googleCalls[0]).toMatchObject({route:'antigravity',imageModel:'synthetic-google-image'});expect(f.apiCalls).toHaveLength(0);
  expect(f.manager.snapshot().selected).toEqual({connectionId:'google',imageModel:'synthetic-google-image'});
- f.disconnectGoogle();expect(f.manager.snapshot().quickChoices.find(c=>c.id==='nano-banana-latest')).toMatchObject({connectionId:'google',billing:'subscription',ready:false});
+ f.disconnectGoogle();expect(f.manager.snapshot().quickChoices.find(c=>c.connectionId==='google'&&c.imageModel==='synthetic-google-image')).toMatchObject({connectionId:'google',billing:'subscription',ready:false,label:'Synthetic Google · Synthetic Google Image'});
 });
 
-test('A quick choice is never ready with a selected image model removed from the live catalog',()=>{
+test('A removed selected image model remains visible as unavailable rather than being relabelled',()=>{
  const f=fixture();f.manager.configure({expectedRevision:0,connectionId:'google',imageModel:'synthetic-google-image'});f.catalog([{id:'synthetic-new-google-image',name:'Synthetic New Google Image'}]);
- const snapshot=f.manager.snapshot(),nano=snapshot.quickChoices.find(choice=>choice.id==='nano-banana-latest')!;
+ const snapshot=f.manager.snapshot(),selected=snapshot.selectedChoice!;
  expect(snapshot.providers.find(p=>p.id==='google')?.ready).toBe(true);
- expect(!nano.ready||snapshot.imageModels.some(model=>model.id===nano.imageModel&&model.kind==='antigravity')).toBe(true);
+ expect(selected).toMatchObject({connectionId:'google',imageModel:'synthetic-google-image',ready:false,label:'Synthetic Google · synthetic-google-image'});
 });

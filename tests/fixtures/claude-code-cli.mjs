@@ -4,6 +4,7 @@ const args=JSON.parse(process.env.FIXTURE_ARGS??'[]'),mode=process.env.FIXTURE_M
 const journal=value=>appendFileSync(process.env.FIXTURE_JOURNAL,JSON.stringify(value)+'\n');
 journal({kind:'launch',args,cwd:process.cwd(),pid:process.pid});
 if(args.includes('auth')){
+ if(JSON.stringify(args)!==JSON.stringify(['auth','status','--json']))throw Error('Auth subcommands must not be consumed by variadic inference options');
  process.stdout.write(JSON.stringify({loggedIn:true,authMethod:mode==='api-identity'?'api_key':'claude.ai'})+'\n');
 }else if(mode==='hang'||mode==='descendant'){
  if(mode==='descendant'){

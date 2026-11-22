@@ -23,6 +23,14 @@ test('daemon callbacks preserve ordinary paths and bind model work to native ide
  const lease=runtime.beginModel(await context('ordinary'));lease.assertCurrent();expect(lease.signal.aborted).toBe(false);lease.close();
 });
 
+test('ordinary saved artifacts remain readable after protected storage support is installed',async()=>{
+ const {f,runtime}=fixture(),artifact=f.add('ordinary-image');
+ await runtime.resources.recordCreated(await runtime.resources.captureFrame('ordinary'),{versionId:artifact.versionId});
+ let reads=0;
+ await expect(runtime.resourceService.materialize({}, {method:'_readVersionContent',args:[{id:artifact.versionId}]},async()=>{reads++;return artifact.bytes})).resolves.toEqual(artifact.bytes);
+ expect(reads).toBe(1);
+});
+
 test('missing historical evidence blocks protected entry before policy mutation',async()=>{
  const {runtime,context,sessions}=fixture();let applied=false;
  await expect(runtime.transition(await context('ordinary'),'class2',()=>{applied=true;sessions.push({rootFrameId:'ordinary',projectId:'project-a',ownerId:'owner-a',organizationId:'org-a',mode:'class2',revision:1})})).rejects.toThrow('history');

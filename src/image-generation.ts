@@ -8,7 +8,7 @@ export const OPENAI_SUBSCRIPTION_IMAGE_MODEL='gpt-image-2';
 export type ImageGenerationRoute = 'images'|'responses'|'subscription'|'antigravity';
 export type ImageGenerationModel = {
   id:string; provider:string; qualifiedId?:string; api:string; baseUrl:string;
-  input?:readonly string[]; requestTimeoutMs?:number;
+  input?:readonly string[]; requestTimeoutMs?:number; imageGenerationCandidate?:boolean; imageGenerationAdvertised?:boolean;
 };
 export type ImageGenerationCapability = {
   available:boolean; status:'available'|'unverified'|'unsupported'; verified:false;
@@ -18,6 +18,7 @@ const imageModel = (id:string) => /^gpt-image-[a-zA-Z0-9.-]+$/.test(id)||id==='c
 function standardAPI(baseUrl:string) {
   try { const u=new URL(baseUrl); return u.href.replace(/\/$/,'')==='https://api.openai.com/v1'; } catch { return false; }
 }
+export function supportsImageReferenceTransport(model:ImageGenerationModel){return ['openai-completions','openai-responses'].includes(model.api)&&model.imageGenerationCandidate===true&&!standardAPI(model.baseUrl)}
 export function imageGenerationCapability(model:ImageGenerationModel, options:{route?:ImageGenerationRoute}={}):ImageGenerationCapability {
   const common={verified:false as const,inputImages:model.input?.includes('image')??false};
   if(model.api==='openai-codex-responses'){
@@ -26,24 +27,28 @@ export function imageGenerationCapability(model:ImageGenerationModel, options:{r
     if(options.route!==undefined&&options.route!=='subscription')return {...common,available:false,status:'unsupported',route:null,billing:'subscription',reason:'Use the subscription image-generation route with this ChatGPT connection.'};
     return {...common,available:true,status:'available',route:'subscription',billing:'subscription',reason:'Uses the existing ChatGPT connection and included Codex usage. Image generation is subject to the account’s subscription limits.'};
   }
-  if(!standardAPI(model.baseUrl)||!['openai-completions','openai-responses'].includes(model.api))return {...common,available:false,status:'unsupported',route:null,billing:'api',reason:'Image generation requires an explicitly selected OpenAI API connection at https://api.openai.com/v1.'};
+  const compatible=['openai-completions','openai-responses'].includes(model.api),official=standardAPI(model.baseUrl),candidate=compatible&&model.imageGenerationCandidate===true;
+  if(!official&&!candidate)return {...common,available:false,status:'unsupported',route:null,billing:'api',reason:'Select an OpenAI image model or a model advertised for image generation by this compatible connection.'};
   if(options.route!==undefined&&!['images','responses'].includes(options.route))return {...common,available:false,status:'unsupported',route:null,billing:'api',reason:'Choose the Images or Responses image-generation route.'};
   if(model.id==='gpt-image-1')return {...common,available:false,status:'unsupported',route:null,billing:'api',reason:'GPT Image 1 was retired. Choose a current image-generation model.'};
-  const route=options.route??(imageModel(model.id)?'images':'responses');
+  const route=options.route??(candidate?'images':imageModel(model.id)?'images':'responses');
+  if(candidate&&route!=='images')return {...common,available:false,status:'unsupported',route:null,billing:'api',reason:'This compatible image model uses the Images route.'};
   if(route==='responses'&&imageModel(model.id))return {...common,available:false,status:'unsupported',route:null,billing:'api',reason:'Select a chat model for the Responses image-generation tool, or use the Images route with this image model.'};
-  return {...common,available:true,status:'available',route,billing:'api',reason:'The OpenAI API image-generation route is configured. Account access and generation have not been verified.'};
+  return {...common,available:true,status:candidate&&!model.imageGenerationAdvertised?'unverified':'available',route,billing:'api',reason:candidate?'The compatible provider listed this image model. The first generation verifies its endpoint support.':'The OpenAI API image-generation route is configured. Account access and generation have not been verified.'};
 }
 
 export class ImageGenerationError extends Error {
   constructor(public readonly code:'unsupported'|'invalid_request'|'authentication'|'provider_error'|'invalid_response'|'aborted'|'timeout',message:string,public readonly status?:number) { super(message);this.name='ImageGenerationError'; }
 }
 export type GeneratedImage = {bytes:Uint8Array;mimeType:'image/png'|'image/jpeg'|'image/webp';extension:'png'|'jpg'|'webp';width:number;height:number;revisedPrompt?:string;generationId?:string};
-export type ImageGenerationResult = {images:GeneratedImage[];provider:string;model:string;imageModel:string;route:ImageGenerationRoute;billing:'api'|'subscription';responseId?:string;usage?:Record<string,unknown>};
+export type ImageGenerationResult = {images:GeneratedImage[];provider:string;model:string;imageModel:string;route:ImageGenerationRoute;billing:'api'|'subscription';responseId?:string;usage?:Record<string,unknown>;operation?:'edit';referenceImageCount?:number};
+export type ImageReferenceInput={bytes:Uint8Array;mimeType:'image/png'|'image/jpeg'|'image/webp'};
 export type ImageGenerationRequest = {
   model:ImageGenerationModel;prompt:string;route?:ImageGenerationRoute;imageModel?:string;
   size?:string;quality?:'auto'|'low'|'medium'|'high'|'xhigh'|'max';
   format?:'png'|'jpeg'|'webp';background?:'auto'|'opaque'|'transparent';count?:number;
   timeoutMs?:number;signal?:AbortSignal;requestId?:string;
+  referenceImages?:readonly ImageReferenceInput[];
 };
 export type ImageGenerationLimits = {imageBytes:number;responseBytes:number;eventBytes:number;imageCount:number;pixels:number;decodedBytes:number};
 const LIMITS:ImageGenerationLimits={imageBytes:32*1024*1024,responseBytes:192*1024*1024,eventBytes:184*1024*1024,imageCount:4,pixels:32*1024*1024,decodedBytes:160*1024*1024};
@@ -163,6 +168,23 @@ function decodeImage(encoded:unknown,format:unknown,limits:ImageGenerationLimits
 export function decodeGeneratedImage(encoded:unknown,format?:unknown,limits?:Partial<ImageGenerationLimits>,revisedPrompt?:unknown):GeneratedImage {
   return decodeImage(encoded,format,bounds(limits),revisedPrompt);
 }
+/** Validate and pin reference bytes before resolving a provider credential. */
+function validatedReferences(value:ImageGenerationRequest['referenceImages'],limits:ImageGenerationLimits):ImageReferenceInput[]{
+  if(value===undefined)return [];
+  const fail=():never=>{throw new ImageGenerationError('invalid_request','Provide one to four valid PNG, JPEG or WebP reference images within the image resource limits.');};
+  if(!Array.isArray(value)||value.length<1||value.length>4)return fail();
+  const references:ImageReferenceInput[]=[];let total=0;
+  for(let i=0;i<value.length;i++){
+    if(!Object.hasOwn(value,i))return fail();
+    const item=value[i];
+    if(!item||!(item.bytes instanceof Uint8Array)||!['image/png','image/jpeg','image/webp'].includes(item.mimeType)||!item.bytes.byteLength||item.bytes.byteLength>Math.min(limits.imageBytes,16*1024*1024))return fail();
+    total+=item.bytes.byteLength;if(total>Math.min(limits.responseBytes,32*1024*1024))return fail();
+    const bytes=Uint8Array.from(item.bytes);
+    try{decodeImage(Buffer.from(bytes).toString('base64'),item.mimeType.slice(6),{...limits,imageBytes:Math.min(limits.imageBytes,16*1024*1024),pixels:Math.min(limits.pixels,16*1024*1024),decodedBytes:Math.min(limits.decodedBytes,80*1024*1024)});}catch{return fail();}
+    references.push({bytes,mimeType:item.mimeType});
+  }
+  return references;
+}
 function providerFailure(body:any,status?:number):never {
   const error=body?.error??body?.response?.error;
   const message=typeof error?.message==='string'?error.message:typeof body?.message==='string'?body.message:'The provider did not complete image generation.';
@@ -196,8 +218,11 @@ export async function generateImage(request:ImageGenerationRequest,deps:ImageGen
   if(background==='transparent'&&format==='jpeg')throw new ImageGenerationError('invalid_request','Transparent backgrounds require PNG or WebP output.');
   if(!Number.isSafeInteger(count)||count<1||count>limits.imageCount||['responses','subscription'].includes(route)&&count!==1)throw new ImageGenerationError('invalid_request','Invalid image count for the selected generation route.');
   const size=request.size??'auto';if(size!=='auto'){const match=/^([1-9]\d{0,4})x([1-9]\d{0,4})$/.exec(size);if(!match||Number(match[1])*Number(match[2])>limits.pixels)throw new ImageGenerationError('invalid_request','Image dimensions exceed the supported pixel limit.');}
-  const generatedModel=request.imageModel??(route==='subscription'?OPENAI_SUBSCRIPTION_IMAGE_MODEL:imageModel(request.model.id)?request.model.id:DEFAULT_IMAGE_MODEL);
-  if(!imageModel(generatedModel)||generatedModel==='gpt-image-1')throw new ImageGenerationError('invalid_request','Choose a current OpenAI image-generation model.');
+  const compatibleImageModel=route==='images'&&supportsImageReferenceTransport(request.model);
+  const references=validatedReferences(request.referenceImages,limits);
+  if(references.length&&!compatibleImageModel)throw new ImageGenerationError('unsupported','Reference-image generation is not implemented for this image route. Choose a compatible image-editing connection.');
+  const generatedModel=request.imageModel??(route==='subscription'?OPENAI_SUBSCRIPTION_IMAGE_MODEL:compatibleImageModel?request.model.id:imageModel(request.model.id)?request.model.id:DEFAULT_IMAGE_MODEL);
+  if((!compatibleImageModel&&(!imageModel(generatedModel)||generatedModel==='gpt-image-1'))||(compatibleImageModel&&generatedModel!==request.model.id))throw new ImageGenerationError('invalid_request','Choose the image model advertised by this compatible connection.');
   if(route==='subscription'&&(generatedModel!==OPENAI_SUBSCRIPTION_IMAGE_MODEL||format!=='png'||!['auto','low','medium','high'].includes(quality)))throw new ImageGenerationError('invalid_request','Subscription image generation uses GPT Image 2 with PNG output and auto, low, medium, or high quality.');
   if(request.requestId!==undefined&&!/^[A-Za-z0-9._:-]{1,128}$/.test(request.requestId))throw new ImageGenerationError('invalid_request','Invalid image-generation request identifier.');
   const timeoutMs=request.timeoutMs??request.model.requestTimeoutMs??600_000;
@@ -211,10 +236,16 @@ export async function generateImage(request:ImageGenerationRequest,deps:ImageGen
     if(typeof secret!=='string'||!secret||secret==='local-no-key-required')throw new ImageGenerationError('authentication',route==='subscription'?'Connect ChatGPT before generating an image.':'The selected OpenAI API connection has no API credential.');
     if(route==='subscription'&&!auth.fetch)throw new ImageGenerationError('authentication','Subscription image generation requires destination-bound ChatGPT authentication.');
     const options={size,quality,output_format:format,background};
-    const body=route==='subscription'?{prompt:request.prompt,background,model:OPENAI_SUBSCRIPTION_IMAGE_MODEL,quality,size}:route==='images'?{model:generatedModel,prompt:request.prompt,n:count,...options,stream:true,partial_images:0}:{model:request.model.id,input:request.prompt,tools:[{type:'image_generation',model:generatedModel,action:'generate',...options,partial_images:0}],tool_choice:{type:'image_generation'},stream:true,store:false};
-    const endpoint=route==='subscription'?'https://chatgpt.com/backend-api/codex/images/generations':route==='images'?'https://api.openai.com/v1/images/generations':'https://api.openai.com/v1/responses';
+    const body=route==='subscription'?{prompt:request.prompt,background,model:OPENAI_SUBSCRIPTION_IMAGE_MODEL,quality,size}:route==='images'?(compatibleImageModel?{model:generatedModel,prompt:request.prompt,n:count,response_format:'b64_json'}:{model:generatedModel,prompt:request.prompt,n:count,...options,stream:true,partial_images:0}):{model:request.model.id,input:request.prompt,tools:[{type:'image_generation',model:generatedModel,action:'generate',...options,partial_images:0}],tool_choice:{type:'image_generation'},stream:true,store:false};
+    let editBody:FormData|undefined;
+    if(references.length){
+      editBody=new FormData();editBody.set('model',generatedModel);editBody.set('prompt',request.prompt);editBody.set('n',String(count));editBody.set('response_format','b64_json');
+      if(size!=='auto')editBody.set('size',size);
+      for(const [index,image]of references.entries())editBody.append(references.length===1?'image':'image[]',new Blob([Uint8Array.from(image.bytes)],{type:image.mimeType}),'reference-'+(index+1)+'.'+(image.mimeType==='image/jpeg'?'jpg':image.mimeType.slice(6)));
+    }
+    const endpoint=references.length?new URL('images/edits',request.model.baseUrl.replace(/\/?$/,'/')).href:route==='subscription'?'https://chatgpt.com/backend-api/codex/images/generations':route==='images'?(compatibleImageModel?new URL('images/generations',request.model.baseUrl.replace(/\/?$/,'/')).href:'https://api.openai.com/v1/images/generations'):'https://api.openai.com/v1/responses';
     const turnId=request.requestId??randomUUID();
-    const response=await abortable((auth.fetch??deps.fetch??fetch)(endpoint,{method:'POST',headers:{authorization:'Bearer '+secret,'content-type':'application/json',accept:route==='subscription'?'application/json':'text/event-stream, application/json',...route==='subscription'?{originator:'chimeric','user-agent':'Chimeric/0.1.0','x-codex-image-turn-id':turnId,'x-codex-turn-metadata':JSON.stringify({turn_id:turnId,model:request.model.id})}:{}},body:JSON.stringify(body),redirect:'error',signal:effectiveSignal}),effectiveSignal);
+    const response=await abortable((auth.fetch??deps.fetch??fetch)(endpoint,{method:'POST',headers:{authorization:'Bearer '+secret,...(!editBody?{'content-type':'application/json'}:{}),accept:route==='subscription'||compatibleImageModel?'application/json':'text/event-stream, application/json',...route==='subscription'?{originator:'chimeric','user-agent':'Chimeric/0.1.0','x-codex-image-turn-id':turnId,'x-codex-turn-metadata':JSON.stringify({turn_id:turnId,model:request.model.id})}:{}},body:editBody??JSON.stringify(body),redirect:'error',signal:effectiveSignal}),effectiveSignal);
     if(!response.ok){
       let raw:string|undefined;
       try{raw=await readStream(response,effectiveSignal,{...limits,responseBytes:Math.min(limits.responseBytes,64*1024)});}catch(error){if(effectiveSignal.aborted)throw error;providerFailure({message:'The provider returned an unreadable error body.'},response.status);}
@@ -253,7 +284,7 @@ export async function generateImage(request:ImageGenerationRequest,deps:ImageGen
     // Usage is metadata, not a channel for arbitrary upstream fields.
     for(const key of ['input_tokens','output_tokens','total_tokens'])if(Number.isSafeInteger(final.usage?.[key])&&final.usage[key]>=0)usage[key]=final.usage[key];
     for(const key of ['input_tokens_details','output_tokens_details'])if(final.usage?.[key]&&typeof final.usage[key]==='object'){const details:Record<string,number>={};for(const field of ['image_tokens','text_tokens','cached_tokens','reasoning_tokens'])if(Number.isSafeInteger(final.usage[key][field])&&final.usage[key][field]>=0)details[field]=final.usage[key][field];if(Object.keys(details).length)usage[key]=details;}
-    return {images,provider:request.model.provider,model:request.model.id,imageModel:generatedModel,route,billing:capability.billing,...(typeof final.id==='string'&&final.id.length<=512?{responseId:final.id}:{}),...(Object.keys(usage).length?{usage}:{})};
+    return {images,provider:request.model.provider,model:request.model.id,imageModel:generatedModel,route,billing:capability.billing,...(references.length?{operation:'edit' as const,referenceImageCount:references.length}:{}),...(typeof final.id==='string'&&final.id.length<=512?{responseId:final.id}:{}),...(Object.keys(usage).length?{usage}:{})};
   }catch(error){
     if(signal.aborted){if(controller.signal.aborted)throw new ImageGenerationError('timeout','Image generation timed out.');throw new ImageGenerationError('aborted','Image generation was cancelled.');}
     if(authSignal?.aborted)throw new ImageGenerationError('authentication','The ChatGPT connection changed while generating the image. Retry with the current connection.');

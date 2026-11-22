@@ -1,5 +1,6 @@
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { dirname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -7,6 +8,19 @@ const resources = dirname(fileURLToPath(import.meta.url));
 const isApp = resources.endsWith('/Contents/Resources');
 const productRoot = isApp ? resolve(resources, '../../..') : resources;
 const defaultPort = 18868;
+const startupLockName = '.chimeric-start.lock';
+const startupLockOwnerName = 'owner.json';
+const startupLockStaleAfterMs = 120_000;
+const workspaceStartupDeadlineMs = 180_000;
+
+export function protectedMacProfile(profile, { platform = process.platform, home = homedir() } = {}) {
+  if (platform !== 'darwin') return false;
+  const candidate = resolve(profile);
+  return ['Desktop', 'Documents', 'Downloads'].some((name) => {
+    const protectedRoot = resolve(home, name);
+    return candidate === protectedRoot || candidate.startsWith(`${protectedRoot}${sep}`);
+  });
+}
 
 export function versionInfo(root = resources) {
   const packaged = join(root, 'chimeric-version.json');
@@ -71,6 +85,102 @@ export function validateSessionUrl(value) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('The runtime returned an invalid session port.');
   parsed.hostname = '127.0.0.1';
   return parsed.toString();
+}
+
+export function startupLockPath(profile) {
+  return join(profile, startupLockName);
+}
+
+function startupLockOwnerPath(profile) {
+  return join(startupLockPath(profile), startupLockOwnerName);
+}
+
+function processIsRunning(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error && typeof error === 'object' && error.code === 'EPERM'; }
+}
+
+export function readStartupLock(profile) {
+  const directory = startupLockPath(profile);
+  try {
+    const stat = statSync(directory);
+    if (!stat.isDirectory()) return null;
+    let owner = null;
+    try {
+      const candidate = JSON.parse(readFileSync(startupLockOwnerPath(profile), 'utf8'));
+      if (candidate && typeof candidate === 'object'
+        && typeof candidate.token === 'string' && candidate.token
+        && Number.isInteger(candidate.pid) && candidate.pid > 0
+        && Number.isFinite(candidate.startedAt)) owner = candidate;
+    } catch {}
+    return { directory, owner, mtimeMs: stat.mtimeMs };
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function reclaimAbandonedStartupLock(profile, { now = Date.now, staleAfterMs = startupLockStaleAfterMs, isProcessRunning = processIsRunning } = {}) {
+  const current = readStartupLock(profile);
+  if (!current) return false;
+  const ageMs = Math.max(0, now() - current.mtimeMs);
+  const ownerIsGone = current.owner && !isProcessRunning(current.owner.pid);
+  const metadataIsTooOld = !current.owner && ageMs >= staleAfterMs;
+  if (!ownerIsGone && !metadataIsTooOld) return false;
+
+  const retired = `${current.directory}.retired-${process.pid}-${randomUUID()}`;
+  try {
+    // Renaming first is atomic. A late owner can no longer delete a newer lock.
+    renameSync(current.directory, retired);
+    rmSync(retired, { recursive: true, force: true });
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+export function acquireStartupLock(profile, options = {}) {
+  const now = options.now ?? Date.now;
+  const token = options.token ?? randomUUID();
+  const pid = options.pid ?? process.pid;
+  const isProcessRunning = options.isProcessRunning ?? processIsRunning;
+  const staleAfterMs = options.staleAfterMs ?? startupLockStaleAfterMs;
+  mkdirSync(profile, { recursive: true, mode: 0o700 });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const directory = startupLockPath(profile);
+    try {
+      mkdirSync(directory, { mode: 0o700 });
+      try {
+        writeFileSync(startupLockOwnerPath(profile), JSON.stringify({ token, pid, startedAt: now() }), { mode: 0o600, flag: 'wx' });
+        chmodSync(startupLockOwnerPath(profile), 0o600);
+      } catch (error) {
+        rmSync(directory, { recursive: true, force: true });
+        throw error;
+      }
+      return {
+        directory,
+        token,
+        release() {
+          const current = readStartupLock(profile);
+          if (!current?.owner || current.owner.token !== token) return false;
+          try {
+            rmSync(directory, { recursive: true, force: false });
+            return true;
+          } catch (error) {
+            if (error && typeof error === 'object' && error.code === 'ENOENT') return false;
+            throw error;
+          }
+        },
+      };
+    } catch (error) {
+      if (!error || typeof error !== 'object' || error.code !== 'EEXIST') throw error;
+      if (!reclaimAbandonedStartupLock(profile, { now, staleAfterMs, isProcessRunning })) return null;
+    }
+  }
+  return null;
 }
 
 function readConfig(configFile, explicit) {
@@ -140,15 +250,78 @@ async function sessionFromRuntime(paths, env, profile) {
   const matches = result.stdout.match(/https?:\/\/(?:localhost|127\.0\.0\.1):\d+\/\?nonce=[a-f0-9]+/gi) ?? [];
   return matches.length ? validateSessionUrl(matches.at(-1)) : null;
 }
+
+// The daemon owns this Unix-domain socket and creates one-use nonces there.
+// Polling `url` used to launch a fresh runtime process every 500 ms while the
+// daemon was booting. On a large existing workspace those competing starts
+// could starve sandbox setup long enough for the native window to time out.
+// The socket is both cheaper and narrower: it can issue only a local session
+// nonce and cannot expose provider credentials or workspace content.
+export async function sessionFromControlSocket(profile, port, {
+  socketExists = existsSync,
+  fetcher = fetch,
+  timeoutMs = 1_500,
+} = {}) {
+  const socket = join(profile, 'daemon.sock');
+  if (!socketExists(socket)) return null;
+  try {
+    const response = await fetcher('http://localhost/nonce', {
+      method: 'POST',
+      unix: socket,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    const nonce = body && typeof body === 'object' ? body.nonce : null;
+    if (typeof nonce !== 'string' || !/^[a-f0-9]{16,}$/i.test(nonce)) return null;
+    return validateSessionUrl(`http://127.0.0.1:${port}/?nonce=${nonce}`);
+  } catch {
+    return null;
+  }
+}
+
+const sleep = (milliseconds) => new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
+
+async function waitForWorkspace(profile, port, deadline) {
+  while (Date.now() < deadline) {
+    const url = await sessionFromControlSocket(profile, port);
+    if (url) return url;
+    await sleep(250);
+  }
+  return null;
+}
+
 async function ensureWorkspace(paths, env, profile, port) {
-  let url = await sessionFromRuntime(paths, env, profile);
+  let url = await sessionFromControlSocket(profile, port) ?? await sessionFromRuntime(paths, env, profile);
   if (url) return url;
+  if (isApp && protectedMacProfile(profile)) {
+    throw new Error('This workspace is stored in a macOS protected folder. Reinstall with Chimeric’s bundled installer so it can relocate a private copy to Application Support. The original workspace is preserved.');
+  }
   mkdirSync(profile, { recursive: true, mode: 0o700 });
-  const parent = Bun.spawn([paths.binary, fileURLToPath(import.meta.url), 'daemon', '--profile', profile, '--port', String(port)], { env, stdout: 'ignore', stderr: 'ignore', stdin: 'ignore', detached: true });
-  parent.unref();
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) { await new Promise((delay) => setTimeout(delay, 500)); url = await sessionFromRuntime(paths, env, profile); if (url) return url; }
-  throw new Error('Chimeric did not become ready within 60 seconds. Read chimeric-launcher.log in the private profile.');
+  const deadline = Date.now() + workspaceStartupDeadlineMs;
+  const lock = acquireStartupLock(profile);
+  if (!lock) {
+    url = await waitForWorkspace(profile, port, deadline);
+    if (url) return url;
+    throw new Error('Another Chimeric startup did not become ready within 3 minutes. No second workspace was started. Read chimeric-launcher.log in the private profile.');
+  }
+  try {
+    // A concurrent launcher may have finished during lock acquisition.
+    url = await sessionFromControlSocket(profile, port) ?? await sessionFromRuntime(paths, env, profile);
+    if (url) return url;
+    const parent = Bun.spawn([paths.binary, fileURLToPath(import.meta.url), 'daemon', '--profile', profile, '--port', String(port)], { env, stdout: 'ignore', stderr: 'ignore', stdin: 'ignore', detached: true });
+    parent.unref();
+    url = await waitForWorkspace(profile, port, deadline);
+    if (url) return url;
+    // This process started the daemon, so it is safe to stop only this fresh
+    // parent if it did not bind. Without this cleanup an invisible failed
+    // bootstrap could survive and later serve stale assets.
+    try { parent.kill('SIGTERM'); } catch {}
+    await Promise.race([parent.exited.catch(() => undefined), sleep(5_000)]);
+    throw new Error('Chimeric did not become ready within 3 minutes. Read chimeric-launcher.log in the private profile.');
+  } finally {
+    lock.release();
+  }
 }
 async function openBrowser(url) {
   const command = process.platform === 'darwin' ? ['open', url] : process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url] : ['xdg-open', url];

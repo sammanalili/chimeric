@@ -34,6 +34,14 @@ test('Explicit Images route stays on the selected OpenAI API credential and requ
   const result=await generateImage({model,prompt:'Synthetic blue circle',route:'images',imageModel:'gpt-image-2.5-sunburst',size:'1024x1024',quality:'low',background:'transparent'},d);expect(result.images).toHaveLength(1);expect(result.route).toBe('images');
 });
 
+test('A catalog-advertised compatible image model stays on its selected connection and uses its Images endpoint',async()=>{
+ const compatible:ImageGenerationModel={id:'ImageGenator',provider:'compatible',qualifiedId:'compatible::ImageGenator',api:'openai-completions',baseUrl:'https://images.example.invalid/v1',input:['text'],requestTimeoutMs:1000,imageGenerationCandidate:true,imageGenerationAdvertised:true};
+ let auth=0,requests=0;
+ expect(imageGenerationCapability(compatible)).toMatchObject({available:true,status:'available',route:'images',billing:'api'});
+ const result=await generateImage({model:compatible,prompt:'Synthetic compatible image',route:'images'},{resolveAuth:async selected=>{auth++;expect(selected).toBe(compatible);return {apiKey:secret}},fetch:(async(url,init)=>{requests++;expect(String(url)).toBe('https://images.example.invalid/v1/images/generations');expect(new Headers(init.headers).get('accept')).toBe('application/json');expect(JSON.parse(String(init.body))).toEqual({model:'ImageGenator',prompt:'Synthetic compatible image',n:1,response_format:'b64_json'});return Response.json({data:[{b64_json:b64}],output_format:'png'})})as typeof fetch});
+ expect(result).toMatchObject({provider:'compatible',model:'ImageGenator',imageModel:'ImageGenator',route:'images',billing:'api'});expect(auth).toBe(1);expect(requests).toBe(1);
+});
+
 test('Subscription generation rejects an API route before resolving credentials or switching billing',async()=>{
   let auth=0,fetches=0;await expect(generateImage({model:subscriptionModel,route:'images',prompt:'Synthetic square'},{resolveAuth:async()=>{auth++;return{apiKey:secret}},fetch:(async()=>{fetches++;return Response.json({})})as typeof fetch})).rejects.toMatchObject({code:'unsupported'});expect(auth).toBe(0);expect(fetches).toBe(0);
 });

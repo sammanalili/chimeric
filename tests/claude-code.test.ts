@@ -16,7 +16,7 @@ test('connection is optional and model aliases appear only after official auth s
   expect(status.models.find(model=>model.id==='claude-fable-5-2')).toMatchObject({contextWindow:1_000_000,maxTokens:128_000,availability:'unknown',verified:false});
   expect(status.models.every(model=>model.verified===false&&model.reasoningEffortsVerified===false)).toBe(true);
   expect(JSON.stringify(status)).not.toContain('private-fixture@example.test');expect(JSON.stringify(status)).not.toContain('/private/fixture');
-  expect(f.records[0][1].slice(-2)).toEqual(['auth','status']);
+  expect(f.records[0][1]).toEqual(['auth','status','--json']);
   const saved=readFileSync(join(f.profile,'local-auth/claude-code/connection.json'),'utf8');expect(saved).not.toContain('private-fixture');expect(JSON.parse(saved)).toEqual({version:1,enabled:true,executable:'/synthetic/claude'});
  }finally{await f.close()}
 });
@@ -47,17 +47,34 @@ test('disconnect wins against a stale auth check even if the subprocess ignores 
  }finally{await f.close()}
 });
 test('official login exposes only a validated authorization URL and rechecks auth on completion',async()=>{
- let release:any;const f=fixture(async(_options:any,args:string[],_input:any,_signal:any,_timeout:any,onData:any)=>{
-  if(args.includes('login')){onData('noise https://evil.test/authorize private-fixture\nhttps://claude.ai/oauth/authorize?state=synthetic');return new Promise(done=>release=done)}
-  return {code:0,stdout:'{"loggedIn":true,"authMethod":"claude.ai"}',stderr:''};
+ let release:any,signedIn=false;const f=fixture(async(_options:any,args:string[],_input:any,_signal:any,_timeout:any,onData:any)=>{
+  if(args.includes('login')){onData('noise https://evil.test/authorize private-fixture\nhttps://claude.ai/oauth/authorize?state=synthetic');return new Promise(done=>release=(value:any)=>{signedIn=true;done(value)})}
+  return {code:signedIn?0:1,stdout:JSON.stringify({loggedIn:signedIn,authMethod:signedIn?'claude.ai':'none'}),stderr:''};
  });try{
   const status=await f.service.action({action:'login'});expect(status.login).toEqual({phase:'waiting',authorizationUrl:'https://claude.ai/oauth/authorize?state=synthetic'});expect(JSON.stringify(status)).not.toContain('evil.test');expect(JSON.stringify(status)).not.toContain('private-fixture');
+  expect(f.records.map(row=>row[1])).toEqual([['auth','status','--json'],['auth','login','--claudeai']]);
   release({code:0,stdout:'',stderr:''});while(f.service.status().operation)await new Promise(done=>setTimeout(done,1));expect(f.service.available()).toBe(true);expect(f.service.status().login?.phase).toBe('connected');
  }finally{await f.close()}
 });
 test('cancel login aborts the official flow and ignores its late completion',async()=>{
- let release:any,signal:any;const f=fixture(async(_options:any,_args:any,_input:any,inputSignal:any)=>{signal=inputSignal;return new Promise(done=>release=done)});try{
+ let release:any,signal:any;const f=fixture(async(_options:any,args:string[],_input:any,inputSignal:any)=>{if(args[1]==='status')return {code:1,stdout:'{"loggedIn":false,"authMethod":"none"}',stderr:''};signal=inputSignal;return new Promise(done=>release=done)});try{
   await f.service.action({action:'login'});await f.service.action({action:'cancel-login'});expect(signal.aborted).toBe(true);release({code:0,stdout:'',stderr:''});await new Promise(done=>setTimeout(done,1));expect(f.service.status().login?.phase).toBe('cancelled');expect(f.service.available()).toBe(false);
+ }finally{await f.close()}
+});
+test('Connect adopts an existing official subscription sign-in without starting login or inference',async()=>{
+ const f=fixture();try{
+  const status=await f.service.action({action:'login'});
+  expect(status).toMatchObject({connected:true,ready:true,authState:'ready',operation:null});
+  expect(f.records.map(row=>row[1])).toEqual([['auth','status','--json']]);
+  expect(status.login).toBeUndefined();
+ }finally{await f.close()}
+});
+test('Connect stops on an invalid auth-status response instead of falling back to login or inference',async()=>{
+ const f=fixture(async()=>({code:0,stdout:'private-fixture-not-auth-status',stderr:'private-fixture-diagnostic'}));try{
+  const status=await f.service.action({action:'login'});
+  expect(status).toMatchObject({connected:false,ready:false,authState:'error',operation:null});
+  expect(f.records.map(row=>row[1])).toEqual([['auth','status','--json']]);
+  expect(JSON.stringify(status)).not.toContain('private-fixture');
  }finally{await f.close()}
 });
 test('invalid actions fail before official commands and Class2 blocks before the provider',async()=>{

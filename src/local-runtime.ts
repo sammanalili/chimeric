@@ -20,6 +20,7 @@ import {AntigravityHttpModels,ANTIGRAVITY_HTTP_PROVIDER_ID,ANTIGRAVITY_HTTP_BASE
 import {Provider} from './registry';
 import {installAntigravityHttp} from './antigravity-http';
 import {ImageGenerationManager} from './image-generation-manager';
+import {createNativeImageReferenceResolver} from './native-image-references';
 import {installImageGenerationHttp} from './image-generation-http';
 import {DecisionManager} from './decision-manager';
 import {installDecisionHttp} from './decision-http';
@@ -88,7 +89,7 @@ antigravityPolicy=new AntigravityConnectionPolicy(profile,{direct:antigravityHtt
 registry.config.providers[ANTIGRAVITY_HTTP_PROVIDER_ID]??=Provider.parse({name:'Antigravity (Google AI subscription)',api:'antigravity-http',baseUrl:ANTIGRAVITY_HTTP_BASE_URL});
 registry.config.providers[ANTIGRAVITY_HTTP_PROVIDER_ID].name='Google Antigravity';
 registry.config.providers[ANTIGRAVITY_PROVIDER_ID].name='Google Antigravity (CLI)';
-const imageGeneration=new ImageGenerationManager(registry,{changed:()=>connections?.notifyServiceChange()});registry.imageGeneration=imageGeneration;
+const imageGeneration=new ImageGenerationManager(registry,{resolveReferenceImages:createNativeImageReferenceResolver(profile,()=>requireNativeSecurity()),changed:()=>connections?.notifyServiceChange()});registry.imageGeneration=imageGeneration;
 const localization=new Localization(profile);
 let connections:ProviderManager;
 let nativeSecurity:NativeSecurityRuntime|undefined;

@@ -1,7 +1,7 @@
 import {existsSync,readFileSync,mkdirSync,writeFileSync,renameSync,chmodSync} from 'node:fs';
 import {join,dirname,isAbsolute} from 'node:path';
 import {z} from 'zod';
-import {ClaudeCodeError,ClaudeCodeModelProvider,claudeCodeSafetyFlags,claudeCodeAuthorizationUrl,
+import {ClaudeCodeError,ClaudeCodeModelProvider,claudeCodeAuthorizationUrl,
  findClaudeCodeExecutable,inspectClaudeCodeExecutable,runClaudeCodeCommand,type ClaudeCodeProviderOptions} from './claude-code-provider';
 export {ClaudeCodeError};
 export const CLAUDE_CODE_PROVIDER_ID='claude-code';
@@ -39,7 +39,7 @@ export class ClaudeCodeModels{
    const bytes=readFileSync(this.file);if(bytes.length>16384)throw Error();
    const value=z.object({version:z.literal(1),enabled:z.boolean(),executable:z.string().max(4096)}).strict().parse(JSON.parse(bytes.toString('utf8')));
    if(value.executable&&!isAbsolute(value.executable))throw Error();
-   this.enabled=value.enabled;this.executable=options.executable??value.executable;this.installed=Boolean(this.executable);
+   this.enabled=value.enabled;this.executable=options.executable??(findClaudeCodeExecutable()||value.executable);this.installed=Boolean(this.executable);
   }catch{this.authState='error';this.error='The saved official-client connection could not be read. Check it again.'}
  }
  onChange(listener:()=>void){this.listeners.add(listener);return()=>this.listeners.delete(listener)}
@@ -79,14 +79,16 @@ export class ClaudeCodeModels{
   return this.track((async()=>{try{
    const info=(this.options.inspect??inspectClaudeCodeExecutable)(this.configuration());
    this.executable=info.executable;this.installed=true;this.version=info.version;this.signatureVerified=info.signatureVerified;
-   const run=await (this.options.run??runClaudeCodeCommand)(this.configuration(),[...claudeCodeSafetyFlags(),'auth','status'],undefined,controller.signal,30000);
+   // Auth is a CLI subcommand, not an agent turn. Inference options include
+   // variadic tool lists which would consume "auth status" as tool names.
+   const run=await (this.options.run??runClaudeCodeCommand)(this.configuration(),['auth','status','--json'],undefined,controller.signal,30000);
    if(this.closed||generation!==this.generation)return this.status();
    if(run.code!==0&&run.code!==1)throw new ClaudeCodeError('The official client could not check sign-in. Run its own authentication command, then check again.',409);
    const value=normalizeAuth(run.stdout);if((run.code===0)!==value.connected)throw new ClaudeCodeError('The official client returned inconsistent authentication status.',409);
    this.authMethod=value.authMethod;
    if(value.connected&&value.authMethod!=='claude.ai')throw new ClaudeCodeError('This connection requires the official client signed in with your Claude subscription. Its current authentication method may use API billing or another provider; no model request was sent.',409);
    this.connected=value.connected;this.authState=value.connected?'ready':'signed_out';this.enabled=value.connected;
-   if(this.login?.phase==='waiting'&&value.connected)this.login={phase:'connected'};
+   if(this.login&&value.connected)this.login={phase:'connected'};
    this.persist();return this.status();
   }catch(error){
    if(generation!==this.generation||this.closed)return this.status();
@@ -94,6 +96,10 @@ export class ClaudeCodeModels{
   }finally{if(generation===this.generation){this.operation=null;this.active=undefined;this.changed()}}})()).then(()=>this.status());
  }
  private async startLogin(){
+  // Adopt an existing official subscription sign-in before opening a browser.
+  // A failed status check is actionable and must not launch an agent/login as
+  // an implicit fallback.
+  const checked=await this.check();if(checked.ready||checked.authState!=='signed_out')return checked;
   const generation=await this.revoke();if(this.closed)throw new ClaudeCodeError('The official-client connection is stopping.',409);if(generation!==this.generation)return this.status();
   let info:ReturnType<typeof inspectClaudeCodeExecutable>;
   try{info=(this.options.inspect??inspectClaudeCodeExecutable)(this.configuration())}catch(error){
@@ -104,7 +110,7 @@ export class ClaudeCodeModels{
   const controller=new AbortController();this.active=controller;this.operation='signing_in';this.login={phase:'waiting'};this.error=undefined;this.connected=false;this.enabled=false;this.changed();
   let output='';
   const pending=(async()=>{try{
-   const run=await (this.options.run??runClaudeCodeCommand)(this.configuration(),[...claudeCodeSafetyFlags(),'auth','login'],undefined,controller.signal,300000,text=>{
+   const run=await (this.options.run??runClaudeCodeCommand)(this.configuration(),['auth','login','--claudeai'],undefined,controller.signal,300000,text=>{
     if(generation!==this.generation||this.closed)return;
     output=(output+text).slice(-65536);const authorizationUrl=claudeCodeAuthorizationUrl(output);
     if(authorizationUrl&&this.login?.authorizationUrl!==authorizationUrl){this.login={phase:'waiting',authorizationUrl};this.changed()}

@@ -30,8 +30,9 @@ export type ResourcePolicyDependencies={
  /** Install only behind a native human action and CSRF boundary. */
  approveRelease?:(draft:ResourceReleaseDraft)=>Promise<{decision:'approve';receiptId:string}|{decision:'deny'}>;
  approveLegacyClassification?:(resource:NativeArtifactContext,classification:'standard'|'class2')=>Promise<{decision:'approve';receiptId:string}|{decision:'deny'}>;
- /** Explicit compatibility, without inventing a durable standard label. This
-  * stops applying permanently once any protected history exists in this store. */
+ /** Explicit local compatibility, without inventing a durable standard label.
+  * It is available only outside a Class 2 consumer. A separate protected
+  * project must not make unrelated ordinary local artifacts unusable. */
  legacyRule?:'deny'|'ordinary-while-disabled';protectionEnabled?:()=>boolean;
  now?:()=>number;writeJson?:(path:string,value:unknown)=>void;onChange?:(revision:number)=>void;
 };
@@ -82,7 +83,7 @@ export class ResourcePolicyStore{
   const record=this.record(v);if(!record)return 'unclassified';return record.dataClass==='class2'||this.protectedEvidence(v)?'class2':'standard';
  }
  private protectedEvidence(v:NativeArtifactContext){const tainted=this.state.roots.filter(r=>r.dataClass==='class2'&&r.organizationId===v.organizationId).map(r=>r.rootFrameId),record=this.record(v);return [...sourceRoots(v),...record?.sourceRoots??[]].some(root=>tainted.includes(root))||this.state.resources.some(r=>r.organizationId===v.organizationId&&r.ownerId===v.ownerId&&r.checksum===v.checksum&&(r.dataClass==='class2'||r.sourceRoots.some(root=>tainted.includes(root))))}
- private compatibility(context?:ResourceContext){return this.deps.legacyRule==='ordinary-while-disabled'&&this.deps.protectionEnabled?.()===false&&context?.mode!=='class2'&&!this.protectedHistory&&!this.state.roots.some(r=>r.dataClass==='class2')&&!this.state.resources.some(r=>r.dataClass==='class2')}
+ private compatibility(context?:ResourceContext){return this.deps.legacyRule==='ordinary-while-disabled'&&context?.mode!=='class2'}
  private storeRecord(v:NativeArtifactContext,context:ResourceContext,classification:'standard'|'class2',parents:string[]){
   const previous=this.record(v),record={versionId:v.versionId,artifactId:v.artifactId,projectId:v.projectId,ownerId:v.ownerId,organizationId:v.organizationId,checksum:v.checksum,binding:resourceBinding(v),dataClass:previous?.dataClass==='class2'?'class2' as const:classification,sourceRoots:[...new Set([...sourceRoots(v),context.rootFrameId,...previous?.sourceRoots??[]])].sort(),sourceVersions:[...new Set([...previous?.sourceVersions??[],...parents])].sort(),classifiedAt:previous?.classifiedAt??this.now()};
   const next=structuredClone(this.state);next.resources=next.resources.filter(r=>key(r)!==key(v));next.resources.push(record);next.revision++;this.commit(next);if(record.dataClass==='class2')this.recordRoot(context,'class2');return record;
@@ -136,14 +137,14 @@ export class ResourcePolicyStore{
   else if(!this.allowed(resource,classification,state.context,state.purpose))fail('protected_resource','The resource permission changed before reading.');
  }
  /** reader is a trusted local materializer; this does not authorize networking. */
- async materialize<T>(lease:ResourceLease,reader:(resource:NativeArtifactContext,evidence:ResourceMaterialization)=>T|Promise<T>):Promise<T>{const state=this.leases.get(lease);if(!state)fail('untrusted_lease','A native resource read lease is required.');if(state.release&&state.materialized)fail('release_unavailable','The reviewed resource read was already used.');state.materialized=true;await this.assertCurrent(lease);const record=this.record(state.resource),storageRootFrameIds=Object.freeze((record?.sourceRoots??[]).filter(root=>this.state.roots.some(candidate=>candidate.organizationId===state.resource.organizationId&&candidate.rootFrameId===root&&candidate.dataClass==='class2')));const value=await reader(state.resource,Object.freeze({storageRootFrameIds}));await this.assertCurrent(lease);return value}
+ async materialize<T>(lease:ResourceLease,reader:(resource:NativeArtifactContext,evidence:ResourceMaterialization)=>T|Promise<T>):Promise<T>{const state=this.leases.get(lease);if(!state)fail('untrusted_lease','A native resource read lease is required.');if(state.release&&state.materialized)fail('release_unavailable','The reviewed resource read was already used.');state.materialized=true;await this.assertCurrent(lease);const record=this.record(state.resource),storageRootFrameIds=Object.freeze((record?.sourceRoots??[]).filter(root=>this.state.roots.some(candidate=>candidate.organizationId===state.resource.organizationId&&candidate.rootFrameId===root&&candidate.dataClass==='class2')));if(lease.dataClass==='class2'&&storageRootFrameIds.length===0)fail('resource_changed','The protected resource has no verified private storage scope.',409);const value=await reader(state.resource,Object.freeze({storageRootFrameIds}));await this.assertCurrent(lease);return value}
  async filterMetadata<T>(rows:ReadonlyArray<T>,consumerFrameId:string|undefined,lookup:(row:T)=>ArtifactLookup):Promise<T[]>{if(rows.length>65536)fail('resource_limit','Too many resource rows.');const result:T[]=[];for(const row of rows)try{await this.authorize(lookup(row),consumerFrameId,'metadata');result.push(row)}catch(error){if(!(error instanceof ResourcePolicyError))throw error}return result}
  async renderDecision(input:ArtifactLookup&{consumerFrameId?:string}){
   try{const lookup:ArtifactLookup=input.versionId?{versionId:input.versionId}:{artifactId:input.artifactId!},resource=await this.resolve(lookup),context=input.consumerFrameId?await this.captureFrame(input.consumerFrameId):undefined;
-   // Once protected research exists, an active browser mount must name the
-   // trusted owning frame. A missing frontend binding must never fall back to
-   // a context-free standard renderer in another open chat.
-   if(!context&&(this.protectedHistory||this.deps.protectionEnabled?.()===true))fail('consumer_required','This preview needs its owning research chat.',403);
+   // Resolve source frames before classifying. A legacy artifact whose source
+   // belongs to a Class 2 root is protected even when it has no old record.
+   // Conversely, a Class 2 session elsewhere must not close an ordinary local
+   // artifact that has no protected source evidence.
    const roots=this.record(resource)?.sourceRoots??sourceRoots(resource),revisions=await Promise.all(roots.map(async root=>{const source=await this.captureFrame(root);return {rootFrameId:source.rootFrameId,revision:source.revision}}));if(context)await this.current(context);
    const classification=this.classification(resource),allowed=this.allowed(resource,classification,context,'metadata'),decision=allowed&&(classification==='standard'||this.compatibility(context))&&context?.mode!=='class2'?'standard':allowed?'inert':'blocked';
    return {revision:this.state.revision,decision,resource:{artifactId:resource.artifactId,versionId:resource.versionId,checksum:resource.checksum,dataClass:classification,sourceRootFrameIds:roots,sourcePolicyRevisions:revisions,consumerRootFrameId:context?.rootFrameId,consumerPolicyRevision:context?.revision},binding:hash([resourceBinding(resource),this.state.revision,context??null]),...(decision==='blocked'?{reason:'This source has no verified permission for the current research chat.'}:{})};
@@ -151,10 +152,10 @@ export class ResourcePolicyStore{
  }
  /** Compatibility for native file-backed previews that have no artifact
   * version identity. This grants no bytes, path, renderer or network access.
-  * It stops permanently after any Class 2 history is recorded. */
+  * A Class 2 consumer remains blocked, but unrelated ordinary sessions work. */
  async unboundStandardDecision(consumerFrameId?:string){
   try{this.open();const context=consumerFrameId?await this.captureFrame(consumerFrameId):undefined;if(context)await this.current(context);
-   return this.compatibility(context)?{revision:this.state.revision,decision:'standard-unbound' as const,consumerRootFrameId:context?.rootFrameId}:{revision:this.state.revision,decision:'blocked' as const,reason:'Unbound file previews are unavailable after protected research has been used.'};
+   return this.compatibility(context)?{revision:this.state.revision,decision:'standard-unbound' as const,consumerRootFrameId:context?.rootFrameId}:{revision:this.state.revision,decision:'blocked' as const,reason:'This file cannot open in the selected Class 2 chat.'};
   }catch(error){if(!(error instanceof ResourcePolicyError))throw error;return {revision:this.state.revision,decision:'blocked' as const,reason:error.message}}
  }
  async frameRenderDecision(sourceFrameId:string,consumerFrameId?:string){const source=await this.captureFrame(sourceFrameId),consumer=consumerFrameId?await this.captureFrame(consumerFrameId):source,classification=this.rootClass(source),sameProject=source.projectId===consumer.projectId,ordinary=classification==='standard'||classification==='unclassified'&&this.compatibility(consumer);return {revision:this.state.revision,decision:ordinary&&source.mode==='standard'&&consumer.mode==='standard'&&sameProject?'standard':classification!=='unclassified'&&consumer.mode==='class2'&&sameProject?'inert':'blocked',dataClass:classification,binding:hash([source,consumer,this.state.revision])}}

@@ -6,15 +6,15 @@ import {artifactFixture} from './helpers/native-artifact-fixture';
 const cleanups:Array<()=>void>=[];afterEach(()=>{for(const done of cleanups.splice(0).reverse())done()});
 function fixture(){const f=artifactFixture();cleanups.push(f.cleanup);return f}
 const destination={kind:'model' as const,id:'synthetic-model',revision:'1',binding:'b'.repeat(64)};
-test('legacy defaults to unclassified deny; explicit disabled compatibility writes no standard label',async()=>{
+test('legacy defaults to unclassified deny; ordinary compatibility survives separate Class 2 history without relabelling bytes',async()=>{
  const f=fixture(),v=f.add('legacy'),strict=f.store();await expect(strict.authorize({versionId:v.versionId},'ordinary','raw-bytes')).rejects.toThrow('not approved');
  let enabled=false;const compatible=f.store({legacyRule:'ordinary-while-disabled',protectionEnabled:()=>enabled});expect((await compatible.renderDecision({versionId:v.versionId,consumerFrameId:'ordinary'})).decision).toBe('standard');expect(compatible.snapshot().resources).toEqual([]);
- enabled=true;await expect(compatible.authorize({versionId:v.versionId},'ordinary','raw-bytes')).rejects.toThrow('not approved');enabled=false;
- await compatible.captureFrame('protected');f.modes.set('protected',{mode:'standard',revision:2});await expect(compatible.authorize({versionId:v.versionId},'ordinary','raw-bytes')).rejects.toThrow('not approved');expect(compatible.snapshot().roots[0].dataClass).toBe('class2');
+ enabled=true;expect((await compatible.renderDecision({versionId:v.versionId,consumerFrameId:'ordinary'})).decision).toBe('standard');
+ await compatible.captureFrame('protected');expect((await compatible.renderDecision({versionId:v.versionId,consumerFrameId:'ordinary'})).decision).toBe('standard');await expect(compatible.authorize({versionId:v.versionId},'protected','raw-bytes')).rejects.toThrow('not approved');expect(compatible.snapshot().roots[0].dataClass).toBe('class2');
 });
-test('unbound compatibility is temporary, records no resource identity, and never reopens after protected history',async()=>{
+test('unbound compatibility records no resource identity and is blocked only in the selected Class 2 chat',async()=>{
  const f=fixture(),published:number[]=[],store=f.store({legacyRule:'ordinary-while-disabled',protectionEnabled:()=>false,onChange:revision=>published.push(revision)});expect(await store.unboundStandardDecision('ordinary')).toMatchObject({decision:'standard-unbound',consumerRootFrameId:'ordinary'});expect(store.snapshot().resources).toEqual([]);expect(published).toEqual([]);
- await store.captureFrame('protected');expect(published).toEqual([1]);expect((await store.unboundStandardDecision('ordinary')).decision).toBe('blocked');store.close();expect((await f.store({legacyRule:'ordinary-while-disabled',protectionEnabled:()=>false}).unboundStandardDecision()).decision).toBe('blocked');expect((await store.unboundStandardDecision()).decision).toBe('blocked');
+ await store.captureFrame('protected');expect(published).toEqual([1]);expect((await store.unboundStandardDecision('ordinary')).decision).toBe('standard-unbound');expect((await store.unboundStandardDecision('protected')).decision).toBe('blocked');store.close();expect((await f.store({legacyRule:'ordinary-while-disabled',protectionEnabled:()=>false}).unboundStandardDecision()).decision).toBe('standard-unbound');expect((await store.unboundStandardDecision()).decision).toBe('blocked');
 });
 test('verified new standard bytes retain native data and protected active rendering stays unavailable',async()=>{
  const f=fixture(),v=f.add('ordinary-v'),store=f.store(),context=await store.captureFrame('ordinary');await store.recordNewRoot(context);await store.recordCreated(context,{versionId:v.versionId});

@@ -15,7 +15,19 @@ The packaged app has been exercised on macOS arm64 with the provider bridge, Cha
 The packaged app does not require Xcode, Homebrew, Bun, or a source build on the Mac that runs it. Xcode Command Line Tools are required only when building a new app from source.
 
 1. Obtain the private-preview `Chimeric.app` package from the person who supplied it. Verify the build and runtime revision supplied with the package.
-2. Copy `Chimeric.app` to `/Applications`. Keep the application bundle intact; do not move its `Contents/Resources` files into a separate system directory.
+2. Install it with the updater carried inside that new bundle. It verifies the app signature and asset manifest, stops the matching local workspace, copies the new app beside `/Applications`, verifies that copy again, then replaces the old bundle atomically. It keeps the old app as a timestamped backup instead of deleting it.
+
+   ```sh
+   python3 /path/to/new/Chimeric.app/Contents/Resources/install-macos-app.py \
+     --app /path/to/new/Chimeric.app \
+     --profile "$HOME/Library/Application Support/Chimeric" \
+     --launch
+   ```
+
+   Do not replace an active `/Applications/Chimeric.app` in Finder while its workspace is running. That can leave the old daemon serving old web assets to a new window.
+
+   If an older workspace is under Desktop, Documents, or Downloads, pass that path with `--profile`. The updater makes a private APFS clone in `~/Library/Application Support/Chimeric`, keeps the original untouched, retains any previous default profile as a timestamped backup, and updates the native app's selected workspace. This avoids a macOS privacy prompt blocking the database before the window can load. Use `--no-migrate-protected-profile` only when you have deliberately granted that app access and accept the privacy prompt.
+
 3. On the first launch, open `/Applications/Chimeric.app` from Finder or with:
 
    ```sh

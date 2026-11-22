@@ -42,7 +42,24 @@ export const Configuration = z.object({
   }).prefault({}),
 });
 export type Configuration = z.infer<typeof Configuration>;
-export type ModelEntry = Model<any> & { qualifiedId: string; providerName: string; capabilitiesVerified: boolean; declaredInput?: Array<'text'|'image'>; imageProbe?:ImageProbeEvidence; mode: string; providerMaxOutputTokens?: number;pricing?:TokenPricing|null;claudeCodeExecutable?:string;claudeCodeGeneration?:number; efforts?: string[];defaultReasoningEffort?:string;subscriptionAvailable?:boolean;available?:boolean;unavailableReason?:string;antigravitySlugs?:Record<string,string>;antigravityExecutable?:string;antigravityGeneration?:number;antigravityProject?:string;requestTimeoutMs:number;replayKey:string };
+export type ModelEntry = Model<any> & { qualifiedId: string; providerName: string; capabilitiesVerified: boolean; declaredInput?: Array<'text'|'image'>; imageProbe?:ImageProbeEvidence; /** Image-output capability advertised by the provider catalog or inferred from a dedicated image-model name. */ imageGenerationCandidate?:boolean; imageGenerationAdvertised?:boolean; mode: string; providerMaxOutputTokens?: number;pricing?:TokenPricing|null;claudeCodeExecutable?:string;claudeCodeGeneration?:number; efforts?: string[];defaultReasoningEffort?:string;subscriptionAvailable?:boolean;available?:boolean;unavailableReason?:string;antigravitySlugs?:Record<string,string>;antigravityExecutable?:string;antigravityGeneration?:number;antigravityProject?:string;requestTimeoutMs:number;replayKey:string };
+export function withModelReplayKey(model:ModelEntry,replayKey:string):ModelEntry{
+  const updated={...model,replayKey},binding=pinnedCredentials.get(model);
+  // Replay partitions must preserve the exact model/credential snapshot.
+  // Object spread alone loses the WeakMap binding; looking up a current
+  // provider by ID can send a replacement credential to the old URL.
+  if(binding)pinnedCredentials.set(updated,binding);
+  return updated;
+}
+function imageGenerationMetadata(raw:any,override:any){
+ const output=[raw?.output_modalities,raw?.output,raw?.modalities?.output,raw?.capabilities?.output,override?.output_modalities,override?.output,override?.capabilities?.output].flatMap(value=>Array.isArray(value)?value:[value]).filter(value=>typeof value==='string').map(value=>value.toLowerCase());
+ const advertised=raw?.image_generation===true||raw?.imageGeneration===true||raw?.capabilities?.image_generation===true||raw?.capabilities?.imageGeneration===true||raw?.capabilities?.image_output===true||raw?.capabilities?.imageOutput===true||output.some(value=>['image','image_generation','image-generation','image_output','image-output'].includes(value));
+ // Some OpenAI-compatible catalogs publish only opaque IDs. This identifies
+ // dedicated image models without naming any individual provider. It is a
+ // candidate, not a background billing probe or a claim of verification.
+ const named=/\b(?:image[-_ ]?gen(?:erator|ator)?|diffusion(?:gemma)?|flux|imagen|stable[-_ ]?diffusion)\b/i.test([raw?.id,raw?.name,raw?.display_name,override?.name].filter(value=>typeof value==='string').join(' '));
+ return {candidate:advertised||named,advertised};
+}
 
 export const defaultConfiguration: Configuration = Configuration.parse({
   providers: {
@@ -228,6 +245,7 @@ export class Registry {
           const advertised=override.input??raw.input_modalities??raw.input;
           const modalities=Array.isArray(advertised)?advertised.filter((x:any)=>x==='text'||x==='image'):['text'];
           if(!modalities.length)modalities.push('text');
+          const imageOutput=imageGenerationMetadata(raw,override);
           const limit=(value:unknown,fallback:number)=>Number.isFinite(Number(value))&&Number(value)>0?Math.floor(Number(value)):fallback;
           const entry: ModelEntry = {
             id: raw.id, qualifiedId, provider: providerId, providerName: p.name,
@@ -244,6 +262,7 @@ export class Registry {
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
             pricing:declaredPricing({...raw,...override}),
             capabilitiesVerified: override.verified === true,
+            ...(imageOutput.candidate?{imageGenerationCandidate:true,imageGenerationAdvertised:imageOutput.advertised}:{}),
             ...(subscriptionCatalog?{subscriptionAvailable:true,capabilitiesVerified:false,defaultReasoningEffort:raw.defaultReasoningEffort}:{}),
             ...(p.api==='claude-code'?{available:claudeReady,unavailableReason:claudeReady?undefined:'Connect the official Claude Code client in Settings → Connections.',claudeCodeExecutable:this.claudeCode?.executablePath(),claudeCodeGeneration:this.claudeCode?.connectionGeneration()}:{}),
             ...(p.api==='antigravity-cli'?{available:agyReady,unavailableReason:agyReady?undefined:'Connect Antigravity and refresh its models in Settings → Connections.',antigravitySlugs:raw.antigravitySlugs,antigravityExecutable:this.antigravity?.executablePath(),antigravityGeneration:this.antigravity?.connectionGeneration(),defaultReasoningEffort:efforts.includes('medium')?'medium':efforts[0]}:{}),
@@ -344,9 +363,13 @@ export class Registry {
     if(model.api==='antigravity-cli')throw new Error('Antigravity uses official CLI authentication.');
     if(model.api==='antigravity-http')throw new Error('Antigravity subscription requests require Google sign-in.');
     if(model.api==='openai-codex-responses')throw new Error('Subscription requests require renewable ChatGPT authentication.');
-    const binding=pinnedCredentials.get(model),key=binding?.key;
-    if (key) return key;
-    if(binding?.required)throw new Error('Missing provider credential: '+binding.label);
+    const binding=pinnedCredentials.get(model);
+    const provider=this.config.providers[model.provider];
+    if (binding?.key) return binding.key;
+    // Missing snapshots may fail closed, but must never acquire credentials
+    // from a newer connection revision. Cached models are pinned on load.
+    const required=binding?.required??!!(provider?.secretRef||provider?.keyEnv);
+    if(required)throw new Error('Missing provider credential: '+(binding?.label||provider?.keyEnv||provider?.name||model.provider));
     // Keyless compatible servers are supported; credentials are never inferred from another connection.
     return 'local-no-key-required';
   }

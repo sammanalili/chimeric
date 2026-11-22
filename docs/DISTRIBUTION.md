@@ -6,7 +6,7 @@ Chimeric currently preserves the upstream application's interface and research e
 
 ## Primary sources
 
-- [Claude Science: Legal and compliance](https://claude.com/docs/claude-science/legal-and-compliance) states that Team and Enterprise use is subject to Commercial Terms, and Pro and Max use is subject to Consumer Terms. The page reserves Anthropic's rights.
+- Preserved upstream components remain subject to their original terms and notices. Chimeric does not send users to an upstream product site for support or sign-in.
 - [Anthropic Commercial Terms](https://www.anthropic.com/legal/commercial-terms), section D.4, restrict reverse engineering and duplication. Section F states that rights to the other party's intellectual property are not granted implicitly.
 - [Anthropic Consumer Terms](https://www.anthropic.com/legal/consumer-terms) are linked by the product's license page. Applicable terms and statutory exceptions need to be assessed for the actual distribution and jurisdiction.
 

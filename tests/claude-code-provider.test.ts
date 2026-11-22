@@ -22,6 +22,7 @@ test('official-client structured tool requests preserve native execution and too
   const final=await f.provider.stream(model,next).result();expect(final.stopReason).toBe('stop');expect(final.content).toEqual([{type:'text',text:'The tool returned 42.'}]);
   expect(f.wire().filter(row=>row.kind==='input').at(-1).prompt).toContain(call.id);
   const args=f.wire().find(row=>row.kind==='launch'&&row.args.includes('--print')).args;for(const flag of ['--safe-mode','--restricted','--strict-mcp-config','--no-session-persistence','--disable-slash-commands'])expect(args).toContain(flag);
+  expect(f.wire().find(row=>row.kind==='launch').args).toEqual(['auth','status','--json']);
   expect(args[args.indexOf('--tools')+1]).toBe('');expect(args[args.indexOf('--setting-sources')+1]).toBe('');expect(args[args.indexOf('--effort')+1]).toBe('high');
   const settings=JSON.parse(args[args.indexOf('--settings')+1]);expect(settings.disableAllHooks).toBe(true);expect(settings.switchModelsOnFlag).toBe(false);expect(settings.fallbackModel).toEqual([]);
   expect(args).not.toContain('--bare');expect(args).not.toContain('--dangerously-skip-permissions');

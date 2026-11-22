@@ -12,6 +12,7 @@ export function isInertRasterData(value:string){
   bytes.subarray(0,4).toString('ascii')==='RIFF'&&bytes.subarray(8,12).toString('ascii')==='WEBP';
 }
 const query=z.object({artifactId:id.optional(),versionId:id.optional(),consumerFrameId:id.optional()}).strict().refine(value=>(value.artifactId===undefined)!==(value.versionId===undefined));
+const imageQuery=z.object({versionId:id,consumerFrameId:id.optional()}).strict();
 const unboundQuery=z.object({consumerFrameId:id.optional()}).strict();
 export type ResourceViewInput=z.infer<typeof query>;
 const base=z.object({artifactId:id,versionId:id,checksum,sourceRootFrameId:id,consumerRootFrameId:id.optional(),policyRevision:z.number().int().nonnegative()});
@@ -32,10 +33,12 @@ export interface ResourceViewBackend {
   * classification, exact bytes and current policy before returning a view.
   * This DTO is never a permit for a later read, renderer, connector or MCP. */
  view(input:ResourceViewInput,signal:AbortSignal):Promise<unknown>;
+ /** Exact, local-only raster bytes for a Markdown image link. */
+ image(input:z.infer<typeof imageQuery>,signal:AbortSignal):Promise<unknown>;
  /** Compatibility decision only. It cannot read or identify a resource. */
  unbound(input:z.infer<typeof unboundQuery>,signal:AbortSignal):Promise<unknown>;
 }
-const blocked:ResourceView={decision:'blocked',reason:'This file has no verified preview permission for the current research chat.'};
+const blocked:ResourceView={decision:'blocked',reason:'This file cannot open in the selected chat.'};
 
 /** Install behind native authentication. No approval mutation, arbitrary path,
  * URL, remote image or renderable HTML can enter through this endpoint. */
@@ -72,6 +75,17 @@ export function installResourceHttp(app:any,backend:ResourceViewBackend,options:
   if(request.raw?.aborted||reply.raw?.destroyed&&!reply.raw?.writableEnded)controller.abort();
   try{controller.signal.throwIfAborted();const result=unboundView.safeParse(await backend.unbound(parsed.data,controller.signal));controller.signal.throwIfAborted();if(!result.success)return reply.code(503).send(blocked);const value=result.data;if(value.decision==='standard-unbound'&&parsed.data.consumerFrameId&&!value.consumerRootFrameId)return reply.code(503).send(blocked);return reply.send(value)}
   catch{return reply.code(controller.signal.aborted?409:503).send(blocked)}finally{request.raw?.removeListener?.('aborted',aborted);reply.raw?.removeListener?.('close',closed)}
+ });
+ app.get('/api/local/resources/image',async(request:any,reply:any)=>{
+  if(!owner(request,reply))return;
+  const parsed=imageQuery.safeParse(request.query);if(!parsed.success)return reply.code(400).send({detail:'Choose one exact image version and an optional consuming chat.'});
+  const controller=new AbortController(),aborted=()=>controller.abort(),closed=()=>{if(!reply.raw?.writableEnded)controller.abort()};request.raw?.once?.('aborted',aborted);reply.raw?.once?.('close',closed);
+  if(request.raw?.aborted||reply.raw?.destroyed&&!reply.raw?.writableEnded)controller.abort();
+  try{
+   controller.signal.throwIfAborted();const value:any=await backend.image(parsed.data,controller.signal);controller.signal.throwIfAborted();
+   if(!value||!['image/png','image/jpeg','image/gif','image/webp'].includes(value.contentType)||!(value.bytes instanceof Uint8Array)||value.bytes.length<1||value.bytes.length>8*1024*1024)return reply.code(503).send();
+   return reply.type(value.contentType).header('content-disposition','inline').header('cross-origin-resource-policy','same-origin').header('content-security-policy',"default-src 'none'; sandbox").send(value.bytes);
+  }catch{return reply.code(controller.signal.aborted?409:404).send()}finally{request.raw?.removeListener?.('aborted',aborted);reply.raw?.removeListener?.('close',closed)}
  });
  app.get('/api/local/resources/component.js',async(request:any,reply:any)=>{
   if(!owner(request,reply))return;

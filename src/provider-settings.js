@@ -35,10 +35,10 @@ export function AnthropicCredentials(){
   const action=async action=>{if(mutating.current)return;mutating.current=true;generation.current++;setBusy(true);setError('');try{const value=await api('/api/local/claude-code','POST',{action});if(live.current){setStatus(value);client.invalidateQueries()}}catch(e){if(live.current)setError(e.message)}finally{mutating.current=false;if(live.current)setBusy(false)}};
   const command=(label,actionName,disabled=false)=>button(label,()=>action(actionName),busy||disabled);
   return jsx.jsxs('section',{'aria-label':t('Anthropic subscription'),'data-testid':'anthropic-subscription',className:'mb-3',children:[
-    jsx.jsx('h3',{className:'mb-2 text-sm font-medium text-text-100',children:t('Model subscriptions')}),
+    jsx.jsx('h3',{className:'mb-2 text-sm font-medium text-text-100',children:t('Anthropic subscription')}),
     jsx.jsxs('div',{className:'rounded-lg border border-border-300 p-3',children:[
       jsx.jsxs('div',{className:'flex flex-wrap items-center justify-between gap-3',children:[
-        jsx.jsxs('div',{children:[jsx.jsx('div',{className:'text-sm font-medium text-text-100',children:'Anthropic'}),jsx.jsx('p',{role:'status',className:'mt-1 text-footnote text-text-400',children:t(!status?'Claude Code connection is not available in this build.':status.ready&&status.connected?'Connected':!status.installed?'Install Claude Code to connect.':status.connected?'Sign-in found · connection unavailable':'Disconnected')})]}),
+        jsx.jsxs('div',{children:[jsx.jsx('div',{className:'text-sm font-medium text-text-100',children:'Anthropic subscription'}),jsx.jsx('p',{role:'status',className:'mt-1 text-footnote text-text-400',children:t(!status?'Claude Code connection is not available in this build.':status.ready&&status.connected?'Connected':!status.installed?'Install Claude Code to connect.':status.connected?'Sign-in found · connection unavailable':'Sign in with Claude Code to connect.')})]}),
         status?.connected?command('Disconnect','disconnect'):command('Connect','login',!status||!status.installed||waiting),
       ]}),
       status?.detail&&jsx.jsx('p',{className:'mt-2 text-footnote text-text-400',role:'status',children:t(status.detail)}),
@@ -86,6 +86,11 @@ export function ModelConnections(){
   },[refresh]);
   const change=(key,value)=>{generation.current++;setForm(f=>({...f,[key]:value}));setDirty(true);setPreview(null)};
   const reset=()=>{generation.current++;setForm(empty());setDirty(false);setPreview(null);setError('')};
+  const addAnthropicApi=()=>{
+    if(busy||dirty)return;
+    generation.current++;setForm({...empty(),name:'Anthropic API',baseUrl:'https://api.anthropic.com',api:'anthropic-messages'});
+    setDirty(true);setPreview(null);setError('');setNotice('');formRef.current?.scrollIntoView({behavior:'auto',block:'start'});
+  };
   const run=async(action,success)=>{
     setBusy(true);setError('');setNotice('');
     try{await action();if(!live.current)return;const value=await refresh();if(!live.current)return;client.invalidateQueries();setNotice(t(success));return value}
@@ -130,8 +135,8 @@ export function ModelConnections(){
   const managedModels=models.filter(m=>m.managed);
   return jsx.jsxs('section',{'aria-label':t('Connections'),'data-chimeric-dirty':dirty||roleDirty?'true':'false',className:'mb-5 border-b border-border-300 pb-4',children:[
     jsx.jsx('h2',{className:'mb-1 text-base font-medium',children:t('Connect an external LLM')}),
-    jsx.jsx('p',{className:'mb-3 text-sm text-text-400',children:t('OpenAI-compatible Chat Completions and Responses APIs are supported. Saved models become available without restarting the app.')}),
-    jsx.jsx('a',{href:'/api/local/help#models',target:'_blank',rel:'noopener noreferrer',className:'mb-3 inline-block text-sm underline',children:t('Setup guide')}),
+    jsx.jsx('p',{className:'mb-3 text-sm text-text-400',children:t('OpenAI-compatible Chat Completions and Responses APIs, plus Anthropic Messages, are supported. Saved models become available without restarting the app.')}),
+    jsx.jsxs('div',{className:'mb-3 flex flex-wrap items-center gap-3',children:[jsx.jsx('a',{href:'/api/local/help#models',target:'_blank',rel:'noopener noreferrer',className:'inline-block text-sm underline',children:t('Setup guide')}),button('Add Anthropic API',addAnthropicApi,busy||dirty,{'data-testid':'add-anthropic-api'})]}),
     jsx.jsxs('div',{ref:formRef,className:'rounded-lg border border-border-300 p-3',children:[
       jsx.jsx('h3',{className:'mb-3 text-sm font-medium',children:t(form.id?'Edit connection':'Add connection')}),
       jsx.jsxs('fieldset',{disabled:busy,className:'space-y-3',children:[

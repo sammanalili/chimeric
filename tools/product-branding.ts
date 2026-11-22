@@ -31,6 +31,7 @@ export function brandFrontendUserText(value: string, name: string): string {
   if (name.endsWith('/CapabilitiesPage-D3j7I2By.js')) {
     return value
       .replaceAll('/.claude-science/jobs/.', '/Chimeric/jobs/.')
+      .replaceAll('~/.claude-science', 'the previous app’s data folder')
       .replaceAll('Run `claude-science login` to refresh it.', 'Refresh it in Settings → Connections.')
       .replaceAll('claude.ai', 'the connector service');
   }

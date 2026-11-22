@@ -2,7 +2,7 @@ import {test,expect} from 'bun:test';
 import {mkdtempSync,rmSync,readFileSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {Registry,defaultConfiguration} from '../src/registry';
+import {Registry,defaultConfiguration,withModelReplayKey} from '../src/registry';
 import {ProviderManager} from '../src/provider-manager';
 import {startBridge} from '../src/bridge';
 
@@ -23,6 +23,20 @@ test('Fresh release configuration contains no personal providers, files or voice
   expect(defaultConfiguration.envFile).toBeUndefined();expect(defaultConfiguration.credentialRefsFile).toBeUndefined();
   expect(defaultConfiguration.modelMetadataFile).toBeUndefined();expect(defaultConfiguration.voice.python).toBe('');
   expect(JSON.stringify(defaultConfiguration)).not.toContain('r-ccs');expect(JSON.stringify(defaultConfiguration)).not.toContain('/Users/');
+});
+
+test('A restored API-key connection never sends the keyless sentinel when its environment key is unavailable',()=>{
+  const f=workspace();
+  try{
+    const registry=new Registry({
+      providers:{protected:{name:'Protected endpoint',baseUrl:'https://example.test/v1',api:'openai-completions',keyEnv:'MISSING_PROVIDER_KEY',models:[{id:'fixture'}]}},
+      defaultModel:'protected::fixture',envFile:'/missing',credentialRefsFile:'/missing',modelMetadataFile:'/missing',
+    },f.dir);
+    const model:any={provider:'protected',api:'openai-completions',id:'fixture',qualifiedId:'protected::fixture'};
+    expect(()=>registry.apiKey(model)).toThrow('Missing provider credential: MISSING_PROVIDER_KEY');
+    const keyless=new Registry({providers:{local:{name:'Local endpoint',baseUrl:'http://127.0.0.1:9999/v1',api:'openai-completions',allowInsecureHttp:true,models:[{id:'fixture'}]}},defaultModel:'local::fixture',envFile:'/missing',credentialRefsFile:'/missing',modelMetadataFile:'/missing'},f.dir);
+    expect(keyless.apiKey({provider:'local',api:'openai-completions'} as any)).toBe('local-no-key-required');
+  }finally{f.close()}
 });
 
 test('A newly registered custom-prefix model runs through the existing bridge and stores no plaintext key',async()=>{
@@ -63,6 +77,54 @@ test('An in-flight stream keeps its original URL and key while later requests us
     expect((await (await pending).json() as any).content[0].text).toBe('OLD');
     expect((await (await call(model)).json() as any).content[0].text).toBe('NEW');
     expect(headers).toEqual(['Bearer old-key','Bearer new-key']);
+  }finally{release();bridge.stop(true);first.stop(true);second.stop(true);f.close()}
+});
+
+test('Root-scoped replay clones keep their captured credential after a connection destination and key change',async()=>{
+  const f=workspace();
+  try{
+    const saved=await f.manager.upsert(spec(0,'https://old.example.test/v1',{apiKey:'synthetic-old-key'}));
+    const id=saved.connections[0].id,original=f.registry.resolve(id+'::fixture');
+    const rootModel=withModelReplayKey(original,original.replayKey+'@native-root:synthetic-root');
+    expect(rootModel.baseUrl).toBe(original.baseUrl);
+    expect(rootModel.replayKey).not.toBe(original.replayKey);
+    expect(f.registry.apiKey(rootModel)).toBe('synthetic-old-key');
+    await f.manager.upsert(spec(1,'https://new.example.test/v1',{id,apiKey:'synthetic-new-key'}));
+    const sessionModel=withModelReplayKey(rootModel,rootModel.replayKey+'@synthetic-session');
+    expect(sessionModel.baseUrl).toBe('https://old.example.test/v1');
+    expect(f.registry.apiKey(rootModel)).toBe('synthetic-old-key');
+    expect(f.registry.apiKey(sessionModel)).toBe('synthetic-old-key');
+    const current=f.registry.resolve(id+'::fixture');
+    expect(current.baseUrl).toBe('https://new.example.test/v1');
+    expect(f.registry.apiKey(current)).toBe('synthetic-new-key');
+    // Arbitrary copies lack a snapshot and cannot pick up the new credential.
+    expect(()=>f.registry.apiKey({...original})).toThrow('Missing provider credential');
+    expect(()=>f.registry.apiKey({...current})).toThrow('Missing provider credential');
+    expect(JSON.stringify(sessionModel)).not.toContain('synthetic-old-key');
+    expect(JSON.stringify(sessionModel)).not.toContain('synthetic-new-key');
+  }finally{f.close()}
+});
+
+test('A native-scoped bridge call cannot send a replacement credential to its original destination',async()=>{
+  const seen:Array<{destination:string;authorization:string|null}>=[];
+  const first=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){seen.push({destination:'old',authorization:request.headers.get('authorization')});return completion('OLD')}});
+  const second=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){seen.push({destination:'new',authorization:request.headers.get('authorization')});return completion('NEW')}});
+  const f=workspace();let release!:()=>void,arrived!:()=>void;
+  const held=new Promise<void>(yes=>release=yes),waiting=new Promise<void>(yes=>arrived=yes);
+  let holdNext=true;
+  const requestAuth=f.registry.requestAuth.bind(f.registry);
+  f.registry.requestAuth=async(model,signal)=>{if(holdNext){holdNext=false;arrived();await held}return requestAuth(model,signal)};
+  const bridge=startBridge(f.registry,'synthetic-bridge-token',0,undefined,{async authorize(_request,body){return {modelId:body.model,replayNamespace:'synthetic-root',assertCurrent:async()=>{},close(){}}}});
+  const call=(model:string)=>fetch(bridge.url.href+'v1/messages',{method:'POST',headers:{'x-api-key':'synthetic-bridge-token','content-type':'application/json'},body:JSON.stringify({model,max_tokens:64,messages:[{role:'user',content:'Synthetic connection test'}]})});
+  try{
+    const saved=await f.manager.upsert(spec(0,first.url.href+'v1',{apiKey:'synthetic-old-key'}));
+    const id=saved.connections[0].id,model=id+'::fixture';
+    const pending=call(model);await waiting;
+    await f.manager.upsert(spec(1,second.url.href+'v1',{id,apiKey:'synthetic-new-key'}));
+    release();
+    expect((await (await pending).json() as any).content[0].text).toBe('OLD');
+    expect((await (await call(model)).json() as any).content[0].text).toBe('NEW');
+    expect(seen).toEqual([{destination:'old',authorization:'Bearer synthetic-old-key'},{destination:'new',authorization:'Bearer synthetic-new-key'}]);
   }finally{release();bridge.stop(true);first.stop(true);second.stop(true);f.close()}
 });
 

@@ -81,6 +81,7 @@ def export_app(runtime: Path, binary: Path, out: Path) -> dict:
         manifest = dict(manifest); manifest.pop('root', None)
         (resources / 'runtime/asset-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         copy(SOURCE / 'tools/launcher.mjs', resources / 'launcher.mjs')
+        copy(SOURCE / 'tools/install-macos-app.py', resources / 'install-macos-app.py')
         (resources / 'chimeric-version.json').write_text(json.dumps(metadata, indent=2) + '\n')
         class2_receipt = integrity._write_class2_receipt(resources, platform='darwin-arm64')
         with tempfile.TemporaryDirectory(prefix='chimeric-compile-') as tmp:
@@ -114,6 +115,7 @@ def export_app(runtime: Path, binary: Path, out: Path) -> dict:
                   'backendBundleSha256': integrity._sha256(resources / 'runtime/local-runtime.js'),
                   'nativeShellSha256': integrity._sha256(contents / 'MacOS/Chimeric'),
                   'launcherSha256': integrity._sha256(resources / 'launcher.mjs'),
+                  'installerSha256': integrity._sha256(resources / 'install-macos-app.py'),
                   'iconSha256': integrity._sha256(resources / 'Chimeric.icns'),
                   'assetTreeTarSha256': tree_sha, 'assetArchiveRawGzipSha256': archive_sha,
                   'antigravityTransport': transport,

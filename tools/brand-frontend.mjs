@@ -18,6 +18,11 @@ const localLoginBody=`{const e=new URL(window.location.href),t=e.searchParams.ha
 const copy=new Map([
   ['claude-science-default','chimeric-default'],['claude-science-…','chimeric-…'],
   ['Settings → Credentials','Settings → Connections'],
+  ['Credentials','Connections'],
+  ['Auto mode is now on by default','Chimeric is ready.'],
+  ['Claude runs on its own and pauses to ask if anything looks unsafe.','Chimeric works within the permissions you choose for each session.'],
+  ['Auto mode needs the sandbox. Turn the sandbox on to use it.','This mode needs the sandbox. Turn it on in Permissions if you want to use it.'],
+  ['This includes existing chats that don\'t have their own setting. Turn it off for new chats in Settings → Permissions, or for one chat in its Session options.','Permissions are set per session and can be changed in Settings → Permissions.'],
   ['Share this ID with Anthropic support when reporting an issue.','Include this ID when reporting an issue.'],
   ['Research skills from Anthropic','Bundled research skills'],
   ['Research connectors from Anthropic','Bundled research connectors'],
@@ -42,6 +47,10 @@ function isCopy(path){
   return false;
 }
 function helpURL(value,name=''){
+  // This toast is shared by every model connection. Sending a RiVault or
+  // OpenAI failure to a Claude status page is both misleading and leaks an
+  // upstream product link into the standalone app.
+  if(value==='https://status.claude.com')return '/api/local/help#connections';
   const appNavigation=/\/(?:index-BgpYmw3d|ControlPanelModal-OAuv-kWB)\.js$/.test(name);
   if(appNavigation){
     if(/^https:\/\/claude\.ai\/admin-settings\//.test(value))return '/api/local/help#permissions';
@@ -52,13 +61,61 @@ function helpURL(value,name=''){
   if(!/docs|support|legal|privacy|claude-science|changelog|product/.test(value))return value;
   return '/api/local/help'+(/update|changelog/.test(value)?'#updates':/privacy|legal|your-data/.test(value)?'#privacy':/permission/.test(value)?'#permissions':/file|upload/.test(value)?'#files':'');
 }
-const output=[];const inventory=[],browserPolicyFiles=new Set(),uploadContextFiles=new Set(),expectedBrowserPolicyFiles=new Set(['ArtifactTile-CFbnK3VR.js','RightPaneTabContent-CNO7IanA.js','HtmlPreview-CXBwtfOG.js','index-BgpYmw3d.js','HostMcpAppTile-DsGRshgh.js','McpAppTile-Bud9Ahpu.js']),expectedUploadContextFiles=new Set(['index-BgpYmw3d.js','useSessionActions-B0Qf6PUm.js']);
+function importedPath(ast,matcher,imported,name){
+  const matches=[];
+  for(const declaration of ast.program.body){
+    if(declaration.type!=='ImportDeclaration'||!matcher.test(declaration.source.value))continue;
+    for(const specifier of declaration.specifiers){
+      if(specifier.type==='ImportSpecifier'&&(specifier.imported.name??specifier.imported.value)===imported)matches.push(declaration.source.value);
+    }
+  }
+  if(matches.length!==1)throw Error('Connections module import boundary changed for '+name);
+  return matches[0];
+}
+function chimericConnectionsModule(ast){
+  // Replace the inherited generic-secret directory rather than putting local
+  // model cards above it. This ensures that AWS, cloud, and upstream
+  // credential controls are neither rendered nor retained in this module.
+  const vendor=importedPath(ast,/\/vendor-[^/]+\.js(?:\?|$)/,'j','jsx runtime');
+  const shell=importedPath(ast,/\/index-BgpYmw3d\.js(?:\?|$)/,'L','settings modal');
+  return `import{j as jsx}from${JSON.stringify(vendor)};import{L as Modal}from${JSON.stringify(shell)};import{AnthropicCredentials as LocalAnthropicCredentials,ModelConnections as LocalModelConnections}from"/api/local/providers/component.js";import{ChatGPTCredentials as LocalChatGPTCredentials}from"/api/local/chatgpt/component.js";import{AntigravityConnection as LocalAntigravityConnection}from"/api/local/antigravity/component.js";import{ImageGenerationSettings as LocalImageGenerationSettings}from"/api/local/image-generation/component.js";import{VoiceSettings as LocalVoiceSettings}from"/api/local/speech/component.js";import{DecisionSettings as LocalDecisionSettings}from"/api/local/classifiers/component.js";const tr=value=>globalThis.ChimericI18n?.t(value)??value;function ChimericConnectionsContent(){return jsx.jsx("div",{"data-testid":"chimeric-connections",className:"flex-1 overflow-y-auto px-4 py-3",children:jsx.jsxs("div",{children:[jsx.jsx("h2",{className:"sr-only",children:tr("Connections")}),jsx.jsx(LocalAnthropicCredentials,{}),jsx.jsx(LocalChatGPTCredentials,{}),jsx.jsx(LocalAntigravityConnection,{}),jsx.jsx(LocalModelConnections,{}),jsx.jsx(LocalImageGenerationSettings,{}),jsx.jsx(LocalVoiceSettings,{}),jsx.jsx(LocalDecisionSettings,{})]})})}function ChimericConnectionsModal({isOpen,onClose}){return jsx.jsx(Modal,{open:isOpen,onClose,size:"md",bodyClassName:"p-0",title:tr("Connections"),children:jsx.jsx(ChimericConnectionsContent,{})})}const connections=Object.freeze(Object.defineProperty({__proto__:null,ConnectionsContent:ChimericConnectionsContent,SecretsManagerContent:ChimericConnectionsContent,default:ChimericConnectionsModal},Symbol.toStringTag,{value:"Module"})),modal=Object.freeze(Object.defineProperty({__proto__:null,ConnectionsModal:ChimericConnectionsModal,SecretsManagerModal:ChimericConnectionsModal},Symbol.toStringTag,{value:"Module"}));export{connections as S,modal as i};`;
+}
+const connectionModules=input.filter(({text})=>text.includes('SecretsManagerContent')&&text.includes('SecretsManagerModal'));
+const connectionModuleName=connectionModules.length===1?connectionModules[0].name.split('/').at(-1):null;
+const escapeRegExp=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+function chimericCapabilitiesConnections(text){
+  // The inherited Customize route has a second path to its fixed credential
+  // catalogue. Keep the rest of that screen, but bind every credential route
+  // to the same local Connections content as Settings.
+  if(!connectionModuleName)throw Error('Could not identify the Chimeric Connections module');
+  const modulePattern=new RegExp(`(["'])(\\./${escapeRegExp(connectionModuleName)}(?:\\?[^"']*)?)\\1`);
+  const specifier=text.match(modulePattern)?.[2];
+  if(!specifier)throw Error('Capabilities page no longer imports the Connections module');
+  const inherited='e.jsx(da,{})';
+  const occurrences=text.split(inherited).length-1;
+  if(occurrences!==2)throw Error('Capabilities credential route boundary changed');
+  const imported=`import{S as LocalChimericConnections}from${JSON.stringify(specifier)};`;
+  if(text.includes(imported))throw Error('Capabilities Connections bridge was already added');
+  const result=imported+text.replaceAll(inherited,'e.jsx(LocalChimericConnections.ConnectionsContent,{})');
+  if(result.includes(inherited))throw Error('Inherited credential route was not fully replaced');
+  return result;
+}
+const output=[];const inventory=[],browserPolicyFiles=new Set(),uploadContextFiles=new Set(),expectedBrowserPolicyFiles=new Set(['ArtifactTile-CFbnK3VR.js','RightPaneTabContent-CNO7IanA.js','HtmlPreview-CXBwtfOG.js','index-BgpYmw3d.js','HostMcpAppTile-DsGRshgh.js','McpAppTile-Bud9Ahpu.js']),expectedUploadContextFiles=new Set(['index-BgpYmw3d.js','useSessionActions-B0Qf6PUm.js']);let connectionsPanelRewrites=0;
+let capabilitiesConnectionsRewrites=0;
 for(const file of input){
   const {name,text:sourceText}=file,sourceAst=parse(sourceText,{sourceType:'unambiguous'}),browserEdits=nativeBrowserPolicyEdits(sourceAst,sourceText,name),uploadEdits=nativeUploadContextEdits(sourceAst,sourceText,name);
   if(browserEdits.length)browserPolicyFiles.add(name.split('/').at(-1));browserEdits.sort((a,b)=>b.start-a.start);for(let i=1;i<browserEdits.length;i++)if(browserEdits[i].end>browserEdits[i-1].start)throw Error('Overlapping native browser edits in '+name);
   if(uploadEdits.length)uploadContextFiles.add(name.split('/').at(-1));const nativeEdits=[...browserEdits,...uploadEdits].sort((a,b)=>b.start-a.start);for(let i=1;i<nativeEdits.length;i++)if(nativeEdits[i].end>nativeEdits[i-1].start)throw Error('Overlapping native policy edits in '+name);
   let text=sourceText;for(const edit of nativeEdits)text=text.slice(0,edit.start)+edit.text+text.slice(edit.end);
+  if(text.includes('case"credentials":return e.jsx(da,{})')&&text.includes('function ln({tab:t,route:s})')){
+    text=chimericCapabilitiesConnections(text);capabilitiesConnectionsRewrites++;
+  }
   const ast=parse(text,{sourceType:'unambiguous'}),edits=[],usageAnchors=new Set();
+  if(name.endsWith('/index-DXq2yXE0.js')){
+    const replacement=chimericConnectionsModule(ast);
+    parse(replacement,{sourceType:'module'});
+    output.push({name,text:replacement,edits:1});connectionsPanelRewrites++;continue;
+  }
   let atoms=0,logos=0,events=0,staticAtoms=0,generalLanguage=0,localLogins=0,imageChoices=0,voiceFallbacks=0,voiceLabels=0,confidentialityParams=0,confidentialityBindings=0,outboundReviews=0;
   traverse(ast,{
     FunctionDeclaration(path){
@@ -181,7 +238,7 @@ for(const file of input){
       let next=retained?value:copy.get(value)??value.replace(/\bClaude(?: Science| Bioscience)?\b/g,'Chimeric').replaceAll('[claude-science]','[chimeric]');
       next=brandFrontendUserText(next,name);
       next=helpURL(next,name);
-      if(name.endsWith('/ControlPanelModal-OAuv-kWB.js')&&ui&&next==='Credentials')next='Connections';
+      if(next==='Credentials')next='Connections';
       if(ui&&next==='Commercial use (default)')next='Commercial use';
       if(ui&&next==='Non-commercial use')next='Non-commercial use (default)';
       if(name.endsWith('/ControlPanelModal-OAuv-kWB.js')&&ui&&next==='Check for updates')next='Update instructions';
@@ -197,7 +254,7 @@ for(const file of input){
     TemplateElement(path){
       const value=path.node.value.raw;
       if(/Claude\s+(?:Opus|Sonnet|Haiku|Code)\b|copyright|©|Anthropic(?:Sans|Serif)/i.test(value))return;
-      let next=value.replace(/\bClaude(?: Science| Bioscience)?\b/g,'Chimeric').replaceAll('[claude-science]','[chimeric]').replace(/Anthropic-hosted/g,'Managed').replace(/Anthropic(?:'s|’s)/g,'the original publisher’s').replace(/Anthropic support/g,'your administrator');
+      let next=copy.get(value)??value.replace(/\bClaude(?: Science| Bioscience)?\b/g,'Chimeric').replaceAll('[claude-science]','[chimeric]').replace(/Anthropic-hosted/g,'Managed').replace(/Anthropic(?:'s|’s)/g,'the original publisher’s').replace(/Anthropic support/g,'your administrator');
       next=brandFrontendUserText(next,name);
       if(next!==value){edits.push({start:path.node.start,end:path.node.end,text:next});inventory.push({file:name,original:value,replacement:next,template:true})}
     },
@@ -217,4 +274,6 @@ for(const file of input){
 }
 if(process.env.CHIMERIC_FRONTEND_COMPLETE==='1'&&(browserPolicyFiles.size!==expectedBrowserPolicyFiles.size||[...expectedBrowserPolicyFiles].some(name=>!browserPolicyFiles.has(name))))throw Error('Missing native browser policy assets: '+JSON.stringify([...browserPolicyFiles]));
 if(process.env.CHIMERIC_FRONTEND_COMPLETE==='1'&&(uploadContextFiles.size!==expectedUploadContextFiles.size||[...expectedUploadContextFiles].some(name=>!uploadContextFiles.has(name))))throw Error('Missing native upload context assets: '+JSON.stringify([...uploadContextFiles]));
+if(process.env.CHIMERIC_FRONTEND_COMPLETE==='1'&&connectionsPanelRewrites!==1)throw Error('Missing Chimeric Connections panel rewrite');
+if(process.env.CHIMERIC_FRONTEND_COMPLETE==='1'&&capabilitiesConnectionsRewrites!==1)throw Error('Missing inherited Capabilities Connections route rewrite');
 process.stdout.write(JSON.stringify({files:output,inventory}));

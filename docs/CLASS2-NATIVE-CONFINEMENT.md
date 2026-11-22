@@ -1,6 +1,6 @@
 # Class 2 must gate native processes and host calls before dispatch
 
-This is an implementation map, not a confinement attestation. Inspection on 2026-11-20 used the checked Darwin 0.1.71 original core at `work/runtime-recovery/original/claude-science`, SHA-256 `e3674e221f9079520f014eb2ef93d0ba151934a47fd561594efcb23a86809e0b`. No live profile, user research, credentials, network inference, or installed application was changed for this audit.
+This is an implementation map, not a confinement attestation. Inspection on 2026-11-20 used the checked Darwin 0.1.71 recovered runtime core, SHA-256 `e3674e221f9079520f014eb2ef93d0ba151934a47fd561594efcb23a86809e0b`. No live profile, user research, credentials, network inference, or installed application was changed for this audit.
 
 `SessionPolicyStore.assertLane` already denies an unverified Class 2 lane. The remaining work is to call it from every actual native dispatch boundary with a trusted current frame context. A hidden tool, model instruction, standing domain decision, or JavaScript HTTP wrapper does not enforce that boundary.
 

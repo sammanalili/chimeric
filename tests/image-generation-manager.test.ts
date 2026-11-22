@@ -8,6 +8,7 @@ import {Registry} from '../src/registry';
 import {ImageGenerationManager,ImageGenerationSettingsError} from '../src/image-generation-manager';
 import {DEFAULT_IMAGE_MODEL,type generateImage} from '../src/image-generation';
 import {SubscriptionManager,SubscriptionVault} from '../src/subscription';
+import type {ImageReferenceResolver} from '../src/native-image-references';
 
 // Generator injection never reaches an external service. The real Registry owns
 // credential pinning; the native-store double writes and reads actual files.
@@ -15,11 +16,12 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4n
 const cleanups:Array<()=>Promise<void>>=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0).reverse())await cleanup()});
 function deferred<T=void>(){let resolve!:(value:T|PromiseLike<T>)=>void;const promise=new Promise<T>(yes=>{resolve=yes});return {promise,resolve}}
-async function fixture(options:{generate?:typeof generateImage;configure?:boolean;subscription?:boolean}={}){
+async function fixture(options:{generate?:typeof generateImage;configure?:boolean;subscription?:boolean;resolveReferenceImages?:ImageReferenceResolver;referenceConnection?:boolean}={}){
  const dir=mkdtempSync(join(tmpdir(),'chimeric-image-manager-'));
+ const referenceConnection=!!options.resolveReferenceImages&&options.referenceConnection!==false;
  const credentials=new Map([['openai','fixture-api-credential-one'],['second','fixture-api-credential-two']]);
  const registry=new Registry({providers:{
-  openai:{name:'Fixture API',api:'openai-responses',baseUrl:'https://api.openai.com/v1',keyEnv:'CHIMERIC_FIXTURE_IMAGE_KEY',revision:'api-1',models:[{id:'fixture-chat'}]},
+  openai:{name:'Fixture API',api:referenceConnection?'openai-completions':'openai-responses',baseUrl:referenceConnection?'https://reference-images.example.invalid/v1':'https://api.openai.com/v1',keyEnv:'CHIMERIC_FIXTURE_IMAGE_KEY',revision:'api-1',models:[referenceConnection?{id:'fixture-reference-image',image_generation:true}:{id:'fixture-chat'}]},
   second:{name:'Second API',api:'openai-responses',baseUrl:'https://api.openai.com/v1',keyEnv:'CHIMERIC_FIXTURE_IMAGE_SECOND_KEY',revision:'api-2',models:[{id:'fixture-chat'}]},
   noKey:{name:'API with no saved key',api:'openai-responses',baseUrl:'https://api.openai.com/v1',keyEnv:'CHIMERIC_FIXTURE_IMAGE_ABSENT_KEY',revision:'api-none',models:[{id:'fixture-chat'}]},
   subscription:{name:'Fixture ChatGPT',api:'openai-codex-responses',baseUrl:'https://chatgpt.com/backend-api',models:[{id:'fixture-chat'}]},
@@ -42,12 +44,13 @@ async function fixture(options:{generate?:typeof generateImage;configure?:boolea
   const auth=await deps.resolveAuth(request.model,request.signal);
   const expected=request.model.api==='openai-codex-responses'?subscriptionVault?.read()?.credential?.access:credentials.get(request.model.provider);
   expect(auth.apiKey===expected).toBe(true);
+  auth.assertCurrent?.();
   authProviders.push(request.model.provider);
   if(options.generate)return options.generate(request,deps);
   return generated(request);
  }) as typeof generateImage;
  const managers:ImageGenerationManager[]=[];
- const open=()=>{const manager=new ImageGenerationManager(registry,{generate:generator});managers.push(manager);return manager};
+ const open=()=>{const manager=new ImageGenerationManager(registry,{generate:generator,resolveReferenceImages:options.resolveReferenceImages});managers.push(manager);return manager};
  let manager=open();
  const save=async(input:any)=>{
    const version_id='version-'+saves.length,storage_path=join('objects',version_id+'.png');
@@ -58,7 +61,7 @@ async function fixture(options:{generate?:typeof generateImage;configure?:boolea
  const host:any={frameId:'frame-1',rootFrameId:'root-1',projectId:'project-1',agentName:'OPERON',
   _artifactSvcImpl:{save_artifact:async(input:any)=>{saves.push(input);return saveImpl?saveImpl(input):save(input)}},
   _fullStore:{_base_path:dir,resolve_storage_path:(path:string)=>join(dir,path),get_version_metadata_lite:async(id:string)=>metadata.get(id),get_version_metadata:async(id:string)=>metadata.get(id)}};
- if(options.configure!==false)manager.configure({expectedRevision:0,connectionId:'openai',imageModel:DEFAULT_IMAGE_MODEL});
+ if(options.configure!==false)manager.configure({expectedRevision:0,connectionId:'openai',imageModel:referenceConnection?'fixture-reference-image':DEFAULT_IMAGE_MODEL});
  cleanups.push(async()=>{for(const instance of managers)try{await instance.close()}catch{}subscription?.close();rmSync(dir,{recursive:true,force:true})});
  return {dir,registry,host,requests,authProviders,saves,metadata,manager,open,save,subscription,subscriptionVault,authPurposes,authSignals,setSubscriptionAccount,setSave:(impl:(input:any)=>Promise<any>)=>{saveImpl=impl},restart:async()=>{await manager.close();managers.splice(managers.indexOf(manager),1);manager=open();return manager}};
 }
@@ -361,4 +364,104 @@ test('An in-flight subscription request retains its billing source when future i
  f.manager.configure({expectedRevision:f.manager.snapshot().revision,connectionId:'openai',imageModel:DEFAULT_IMAGE_MODEL});gate.resolve();
  expect(await pending).toMatchObject({status:'success',result:{provider:'subscription',route:'subscription',billing:'subscription'}});
  expect(await f.manager.execute(f.host,call,args)).toMatchObject({status:'error'});expect(f.requests).toHaveLength(1);expect(f.authProviders).toEqual(['subscription']);
+});
+
+
+const referenceVersion='9e600eb1-a3da-4c36-91b2-87b94ccdd09a';
+const referenceChecksum=createHash('sha256').update(png).digest('hex');
+const referenceArgs={...args,reference_image_version_ids:[referenceVersion]};
+const referenceReceipt={artifact_id:'native-guide-artifact',version_id:referenceVersion,checksum:referenceChecksum};
+function referenceResolver(check:()=>void=()=>{}):ImageReferenceResolver{
+ return async()=>({images:[{bytes:png,mimeType:'image/png'}],references:[referenceReceipt],assertCurrent:async()=>check()});
+}
+
+test('Native reference bytes reach the selected generator while receipts retain IDs and checksum only',async()=>{
+ const f=await fixture({resolveReferenceImages:referenceResolver(),generate:async request=>({...generated(request),operation:'edit',referenceImageCount:1})});
+ expect(f.manager.toolDefinition()?.input_schema.properties.reference_image_version_ids).toMatchObject({minItems:1,maxItems:4,uniqueItems:true});
+ const out=await f.manager.execute(f.host,call,referenceArgs);
+ expect(out).toMatchObject({status:'success',result:{operation:'edit',reference_image_count:1,reference_images:[referenceReceipt]}});
+ expect(f.requests[0].referenceImages).toEqual([{bytes:png,mimeType:'image/png'}]);
+ const db=new Database(join(f.dir,'image-generation','jobs.sqlite'),{readonly:true});
+ const receipt=(db.query('SELECT result FROM jobs').get() as any).result;db.close();
+ expect(receipt).not.toContain(png.toString('base64'));expect(receipt).not.toContain('"referenceImages"');
+ expect(await (await f.restart()).execute(f.host,call,referenceArgs)).toEqual(out);expect(f.requests).toHaveLength(1);
+});
+
+test('Native reference arguments reject paths, URLs, duplicates and extra images before resolution or auth',async()=>{
+ let resolutions=0;
+ const f=await fixture({resolveReferenceImages:async()=>{resolutions++;return referenceResolver()(f.host,{versionIds:[referenceVersion]})}});
+ for(const reference_image_version_ids of [[],['/tmp/guide.png'],['https://example.test/guide.png'],[referenceVersion,referenceVersion],Array(5).fill(referenceVersion)]){
+  await expect(f.manager.execute(f.host,call,{...args,reference_image_version_ids})).rejects.toBeDefined();
+ }
+ expect(resolutions).toBe(0);expect(f.authProviders).toHaveLength(0);expect(f.saves).toHaveLength(0);
+});
+
+test('Missing native authorization and reference resolution failures cannot dispatch an image request',async()=>{
+ const absent=await fixture();expect(await absent.manager.execute(absent.host,call,referenceArgs)).toMatchObject({status:'error'});expect(absent.requests).toHaveLength(0);
+ const denied=await fixture({resolveReferenceImages:async()=>{throw Error('Native reference denied')}});
+ expect(await denied.manager.execute(denied.host,call,referenceArgs)).toMatchObject({status:'error',error:'Native reference denied'});expect(denied.authProviders).toHaveLength(0);expect(denied.requests).toHaveLength(0);
+});
+
+test('A revoked reference prevents completed receipt replay without a second request',async()=>{
+ let allowed=true;const f=await fixture({resolveReferenceImages:referenceResolver(()=>{if(!allowed)throw Error('Native scope changed')})});
+ expect(await f.manager.execute(f.host,call,referenceArgs)).toMatchObject({status:'success'});allowed=false;
+ expect(await (await f.restart()).execute(f.host,call,referenceArgs)).toMatchObject({status:'error',error:'Native scope changed'});
+ expect(f.requests).toHaveLength(1);expect(f.saves).toHaveLength(1);
+});
+
+test('Changed reference identity or checksum cannot reuse a paid request ID',async()=>{
+ let checksum=referenceChecksum;const f=await fixture({resolveReferenceImages:async()=>({images:[{bytes:png,mimeType:'image/png'}],references:[{...referenceReceipt,checksum}],assertCurrent:async()=>{}})});
+ await f.manager.execute(f.host,call,referenceArgs);checksum='f'.repeat(64);
+ expect(await f.manager.execute(f.host,call,referenceArgs)).toMatchObject({status:'error',error:expect.stringContaining('different')});expect(f.requests).toHaveLength(1);
+});
+
+test('A reference revoked during provider auth prevents dispatch and cannot be retried implicitly',async()=>{
+ let allowed=true;const f=await fixture({resolveReferenceImages:referenceResolver(()=>{if(!allowed)throw Error('Reference revoked during auth')})});
+ const original=f.registry.requestAuth.bind(f.registry);f.registry.requestAuth=async(...params:any[])=>{const auth=await original(...params as Parameters<typeof original>);allowed=false;return auth};
+ expect(await f.manager.execute(f.host,call,referenceArgs)).toMatchObject({status:'error',error:'Reference revoked during auth'});
+ expect(f.authProviders).toHaveLength(0);expect(f.saves).toHaveLength(0);allowed=true;
+ expect(await f.manager.execute(f.host,call,referenceArgs)).toMatchObject({status:'error',error:expect.stringContaining('not been sent again')});expect(f.requests).toHaveLength(1);
+});
+
+test('A reference revoked while generation is pending prevents saving and a duplicate charge',async()=>{
+ const gate=deferred(),entered=deferred();let allowed=true;
+ const f=await fixture({resolveReferenceImages:referenceResolver(()=>{if(!allowed)throw Error('Reference scope changed')}),generate:async request=>{entered.resolve();await gate.promise;return generated(request)}});
+ const pending=f.manager.execute(f.host,call,referenceArgs);await entered.promise;allowed=false;gate.resolve();
+ expect(await pending).toMatchObject({status:'error',error:'Reference scope changed'});expect(f.saves).toHaveLength(0);allowed=true;
+ expect(await f.manager.execute(f.host,call,referenceArgs)).toMatchObject({status:'error',error:expect.stringContaining('not been sent again')});expect(f.requests).toHaveLength(1);
+});
+
+test('Subscription selection rejects reference images before resolving files or subscription auth',async()=>{
+ let resolutions=0;const f=await fixture({subscription:true,resolveReferenceImages:async(...input)=>{resolutions++;return referenceResolver()(...input)}});selectSubscription(f);
+ expect(f.manager.toolDefinition()?.input_schema.properties).not.toHaveProperty('reference_image_version_ids');
+ expect(await f.manager.execute(f.host,call,referenceArgs)).toMatchObject({status:'error',error:expect.stringContaining('API image connection')});
+ expect(resolutions).toBe(0);expect(f.authPurposes).toHaveLength(0);expect(f.requests).toHaveLength(0);
+});
+
+test('Official OpenAI image generation hides reference inputs and rejects them before native resolution or auth while text generation works',async()=>{
+ let resolutions=0,authCalls=0;
+ const f=await fixture({referenceConnection:false,resolveReferenceImages:async()=>{resolutions++;throw Error('The unsupported route must not resolve references')}});
+ const original=f.registry.requestAuth.bind(f.registry);f.registry.requestAuth=async(...params:Parameters<typeof original>)=>{authCalls++;return original(...params)};
+ expect(f.manager.toolDefinition()?.input_schema.properties).not.toHaveProperty('reference_image_version_ids');
+ expect(await f.manager.execute(f.host,call,referenceArgs)).toMatchObject({status:'error',error:expect.stringContaining('compatible API image connection')});
+ expect(resolutions).toBe(0);expect(authCalls).toBe(0);expect(f.requests).toHaveLength(0);expect(f.saves).toHaveLength(0);
+ expect(await f.manager.execute(f.host,call,args)).toMatchObject({status:'success',result:{provider:'openai',route:'images',billing:'api'}});
+ expect(resolutions).toBe(0);expect(authCalls).toBe(1);expect(f.requests).toHaveLength(1);expect(f.requests[0]).not.toHaveProperty('referenceImages');expect(f.saves).toHaveLength(1);
+});
+
+test('Shutdown cancels reference authorization before a job or credential can be created',async()=>{
+ const entered=deferred();
+ const f=await fixture({resolveReferenceImages:async(_host,{signal})=>{entered.resolve();await new Promise<void>(resolve=>signal!.addEventListener('abort',()=>resolve(),{once:true}));signal!.throwIfAborted();throw Error('unreachable')}});
+ const pending=f.manager.execute(f.host,call,referenceArgs);await entered.promise;await f.manager.close();
+ expect(await pending).toMatchObject({status:'error',error:expect.stringContaining('cancelled')});expect(f.requests).toHaveLength(0);expect(f.authProviders).toHaveLength(0);
+});
+
+
+test('The final synchronous auth guard rechecks native references and retains the credential guard',async()=>{
+ let nativeCurrent=true,nativeChecks=0,credentialChecks=0;
+ const f=await fixture({resolveReferenceImages:async()=>({...await referenceResolver()(f.host,{versionIds:[referenceVersion]}),assertDispatchCurrent:()=>{nativeChecks++;if(!nativeCurrent)throw Error('Native scope changed before fetch')}})});
+ const original=f.registry.requestAuth.bind(f.registry);
+ f.registry.requestAuth=async(...params:any[])=>({...await original(...params as Parameters<typeof original>),assertCurrent:()=>{credentialChecks++;nativeCurrent=false}});
+ expect(await f.manager.execute(f.host,call,referenceArgs)).toMatchObject({status:'error',error:'Native scope changed before fetch'});
+ expect(credentialChecks).toBe(1);expect(nativeChecks).toBe(1);expect(f.authProviders).toHaveLength(0);expect(f.saves).toHaveLength(0);
 });
