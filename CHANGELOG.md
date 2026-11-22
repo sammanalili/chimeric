@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0-rc.9 - 2026-11-22
+
+- Added real image-block input to the official Claude subscription transport, preserving user/tool-result image associations and the existing attachment converter path. Synthetic PNG and PDF checks passed with Haiku 5.5. Images are limited to 5 MiB each and 8 MiB for the complete serialized turn.
+- Corrected reviewed Claude context/output metadata to 1M/128k, separated the last prompt's context footprint from cumulative CLI billing usage, and applied a sanitized per-inference output-token cap without changing sign-in or discovery environments.
+
+- Fixed Claude Code model pinning and default selection by preserving qualified model IDs instead of treating them as legacy aliases.
+- Added a visible, build-derived Chimeric version in General settings.
+- Filtered chat selectors to compatible, available text models and added a separate **Show in selector** control for each chat model. Hiding removes its pin; pinning restores visibility. Existing sessions keep their selected-model labels and reasoning metadata, and image/speech selectors retain their dedicated models.
+- Added Anthropic subscription model discovery through the installed official client's metadata-only initialization. Connection checks and sign-in load the catalog automatically; **Refresh models** requests updated model names and supported reasoning levels. Listing models sends no chat prompt and requires no separate SDK package.
+- Fixed Settings → Connections scrolling by restoring the shared panel’s bounded height. The full connection and model lists remain reachable in both Settings and the standalone modal.
+- Kept background-page scrolling contained while browsing long connection settings.
+
 ## 0.3.0-rc.8 - 2026-11-22
 
 This source prerelease collects the fixes made after the public 0.3.0-rc.2 release. The original runtime and private profiles are excluded.

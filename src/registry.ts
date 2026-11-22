@@ -36,6 +36,7 @@ export const Configuration = z.object({
   providers: z.record(z.string(), Provider),
   defaultModel: z.string(), roles: z.record(z.string(), z.string()).default({}),
   headlineModels: z.array(z.string()).default([]),
+  hiddenModels: z.array(z.string()).default([]),
   searchUrl: z.string().url().optional(),
   voice: z.object({
     python:z.string().default(''),runtimeRoot:z.string().default(''),model:z.string().default('base'),
@@ -330,7 +331,9 @@ export class Registry {
   }
   resolve(id: string): ModelEntry {
     let resolved = id.replace(/^anthropic\//,'');
-    if (resolved.startsWith("claude-")) {
+    // Fully qualified provider IDs are exact routes. In particular,
+    // claude-code::opus must not be treated as a legacy Claude role alias.
+    if (!resolved.includes('::') && resolved.startsWith("claude-")) {
       const role = /haiku/.test(resolved) ? "small" : /opus|fable/.test(resolved) ? "large" : "medium";
       resolved = this.config.roles[role] ?? this.state.model;
     }

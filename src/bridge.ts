@@ -5,7 +5,7 @@ import {dispatchModel} from './model-dispatch';
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript';
 import { Registry, withModelReplayKey } from './registry';
 import { ContentReader } from './content';
-import { ReplayStore, toContext, nativeMessage, nativeUsage, stopReason, toolChoice, toNativeContent } from './protocol';
+import { ReplayStore, toContext, nativeMessage, messageContextUsage, stopReason, toolChoice, toNativeContent } from './protocol';
 import { localServerTool, executeServerTool } from './server-tools';
 import {defaultEffort,modelEfforts} from './model-effort';
 import {FABLE_5_2_ID,anthropicConfigurationError} from './anthropic-compat';
@@ -146,7 +146,11 @@ export function startBridge(registry: Registry, token: string, port = 0, serverT
           }
           if (!final) throw new Error('Local server-tool round limit reached');
           const message = nativeMessage(final, body.model, id); message.content = blocks;
-          message.usage = { ...nativeUsage(final), input_tokens: totalInput, output_tokens: totalOutput };
+          // A CLI can consume several provider requests to produce this one
+          // native turn. Its last request describes the occupied context;
+          // summing billed inputs would make the native compactor fire early.
+          // Accounting above and the audit below keep the aggregate spend.
+          if(!messageContextUsage(final))message.usage = { ...message.usage, input_tokens: totalInput, output_tokens: totalOutput };
           emit('message_delta', { type: 'message_delta', delta: { stop_reason: stopReason(final.stopReason), stop_sequence: null }, usage: message.usage });
           emit('message_stop', { type: 'message_stop' });
           audit({ event: 'complete', id, provider: model.provider, model: model.id, durationMs: Date.now() - requestedAt, inputTokens: totalInput, outputTokens: totalOutput, toolCalls: blocks.filter(b => b.type.endsWith('tool_use')).map(b => b.name) });

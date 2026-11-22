@@ -238,6 +238,7 @@ const bundle=await Bun.build({entrypoints:[resolve('src/local-runtime.ts')],targ
 if (!bundle.success) throw new Error('Local provider service bundle failed: '+bundle.logs.join('\n'));
 copyFileSync(resolve('src/chatgpt-credentials.js'),join(out,'chatgpt-credentials.js'));
 copyFileSync(resolve('src/provider-settings.js'),join(out,'provider-settings.js'));
+copyFileSync(resolve('src/version-settings.js'),join(out,'version-settings.js'));
 copyFileSync(resolve('src/antigravity-settings.js'),join(out,'antigravity-settings.js'));
 copyFileSync(resolve('src/image-generation-settings.js'),join(out,'image-generation-settings.js'));
 copyFileSync(resolve('src/decision-settings.js'),join(out,'decision-settings.js'));

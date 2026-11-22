@@ -113,7 +113,9 @@ export function ModelConnections(){
     generation.current++;setForm({...empty(),...connection,apiKey:'',modelsText:connection.models.map(m=>m.id).join('\n'),requestTimeoutSeconds:connection.requestTimeoutMs/1000});
     setDirty(true);setPreview(null);setError('');formRef.current?.scrollIntoView({behavior:'auto',block:'start'});
   };
-  const pin=id=>run(()=>api('/api/local/connections/settings','PUT',{expectedRevision:data.revision,roles:data.roles,headlineModels:data.headlineModels.includes(id)?data.headlineModels.filter(x=>x!==id):[...data.headlineModels,id]}),'Pinned models updated.');
+  const pin=id=>run(()=>api('/api/local/connections/settings','PUT',{expectedRevision:data.revision,roles:data.roles,headlineModels:data.headlineModels.includes(id)?data.headlineModels.filter(x=>x!==id):[...data.headlineModels,id],hiddenModels:(data.hiddenModels??[]).filter(value=>value!==id)}),'Pinned models updated.');
+  const visibility=(id,shown)=>run(()=>api('/api/local/connections/settings','PUT',{expectedRevision:data.revision,roles:data.roles,headlineModels:shown?data.headlineModels:data.headlineModels.filter(value=>value!==id),hiddenModels:shown?(data.hiddenModels??[]).filter(value=>value!==id):[...new Set([...(data.hiddenModels??[]),id])]}),'Selector visibility updated.');
+  const selectorChoice=model=>model.mode==='chat'&&jsx.jsxs('label',{className:'mt-2 flex items-center gap-2 text-footnote text-text-300',children:[jsx.jsx('input',{type:'checkbox',checked:!(data.hiddenModels??[]).includes(model.qualifiedId),disabled:busy,'aria-label':t('Show in selector')+': '+model.name,'data-testid':'model-selector-visibility',onChange:event=>visibility(model.qualifiedId,event.target.checked)}),t('Show in selector')]});
   const use=id=>run(async()=>{await api('/api/models/selection','PUT',{model:id});return api('/api/local/connections')},'Default model updated.');
   const probe=async(connection,model)=>{
     setBusy(true);setError('');setNotice('');
@@ -185,7 +187,8 @@ export function ModelConnections(){
         m.imageProbe&&jsx.jsx('p',{className:'mt-1 text-footnote text-text-400',children:t(m.imageProbe.detail)+' · '+new Date(m.imageProbe.testedAt).toLocaleString()}),
         m.available===false&&jsx.jsx('p',{className:'mt-1 text-footnote',children:t('Unavailable in the current ChatGPT model catalog')}),
         m.mode==='chat'&&button('Probe image input',()=>probe(c,m),busy||m.available===false||!!data.probeJobs?.some(job=>job.providerId===c.id&&job.status==='running'),{'aria-label':t('Probe image input')+': '+m.name}),
-        jsx.jsxs('div',{className:'mt-1 flex flex-wrap gap-2',children:[button(m.qualifiedId===data.selectedModel?'Default':'Use as default',()=>use(m.qualifiedId),busy||m.mode!=='chat'||m.available===false||m.qualifiedId===data.selectedModel),button(data.headlineModels.includes(m.qualifiedId)?'Unpin':'Pin',()=>pin(m.qualifiedId),busy||m.mode!=='chat')]})
+        selectorChoice(m),
+        jsx.jsxs('div',{className:'mt-1 flex flex-wrap gap-2',children:[button(m.qualifiedId===data.selectedModel?'Default':'Use as default',()=>use(m.qualifiedId),busy||!m.selectorEligible||m.qualifiedId===data.selectedModel),button(data.headlineModels.includes(m.qualifiedId)?'Unpin':'Pin',()=>pin(m.qualifiedId),busy||m.mode!=='chat'||!m.selectorEligible&&!data.headlineModels.includes(m.qualifiedId))]})
       ]},m.id))}),
       !c.subscription&&jsx.jsx(ConnectionEligibility,{connectionId:c.id})
     ]},c.id))}),
@@ -193,9 +196,10 @@ export function ModelConnections(){
       jsx.jsx('summary',{className:'cursor-pointer text-sm font-medium',children:t('Available models')}),
       jsx.jsx('ul',{className:'mt-3 space-y-2',children:managedModels.map(m=>jsx.jsxs('li',{className:'border-t border-border-300 pt-2',children:[
         jsx.jsx('div',{className:'break-all text-sm',children:m.provider+' · '+m.name}),
+        selectorChoice(m),
         jsx.jsxs('div',{className:'mt-1 flex flex-wrap gap-2',children:[
-          button(m.qualifiedId===data.selectedModel?'Default':'Use as default',()=>use(m.qualifiedId),busy||m.available===false||m.qualifiedId===data.selectedModel),
-          button(data.headlineModels.includes(m.qualifiedId)?'Unpin':'Pin',()=>pin(m.qualifiedId),busy),
+          button(m.qualifiedId===data.selectedModel?'Default':'Use as default',()=>use(m.qualifiedId),busy||!m.selectorEligible||m.qualifiedId===data.selectedModel),
+          button(data.headlineModels.includes(m.qualifiedId)?'Unpin':'Pin',()=>pin(m.qualifiedId),busy||!m.selectorEligible&&!data.headlineModels.includes(m.qualifiedId)),
         ]}),
       ]},m.qualifiedId))}),
     ]}),

@@ -1,6 +1,6 @@
 {
   "product": "Chimeric",
-  "version": "0.3.0-rc.8",
+  "version": "0.3.0-rc.9",
   "channel": "prerelease",
   "reviewedOn": "2026-11-22",
   "releaseGates": [
@@ -9,7 +9,7 @@
       "status": "passed",
       "requirement": "The clean source boundary, documentation links, credential exclusions and regression tests pass on the exported tree.",
       "evidence": "docs/SOURCE-VERIFICATION.json",
-      "note": "The 0.3.0-rc.8 clean export passed 991 Bun tests and 65 Python tests, with 68 and four declared native-fixture skips respectively. The current source verification records exact scope."
+      "note": "The 0.3.0-rc.9 clean export passed 1,036 Bun tests and 65 Python tests, with 68 and four declared native-fixture skips respectively. The current source verification records exact scope, including genuine Haiku image and PDF attachment checks."
     },
     {
       "id": "artifact-scan",

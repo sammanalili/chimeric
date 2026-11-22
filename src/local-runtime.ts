@@ -11,6 +11,7 @@ import {makeCatalog} from './catalog';
 import {SubscriptionManager,SubscriptionVault} from './subscription';
 import {ProviderManager} from './provider-manager';
 import {installProviderHttp} from './providers-http';
+import {installVersionHttp} from './version-http';
 import {Localization} from './localization';
 import {installHelp} from './help';
 import {localGate} from './local-gate';
@@ -199,6 +200,7 @@ const local = {
     installResourceHttp(app,requireNativeSecurity().resourceViews,{ownerUserId:'local-dev',moduleVersion:assetInfo.moduleVersion??'?science_local=chatgpt-v1'});
     installSttHttp(app,speech.settings,assetInfo.moduleVersion??'?science_local=chatgpt-v1');
     installProviderHttp(app,connections,assetInfo.moduleVersion??'?science_local=chatgpt-v1');
+    installVersionHttp(app,assetInfo.moduleVersion??'?science_local=chatgpt-v1');
     installAntigravityHttp(app,antigravity,assetInfo.moduleVersion??'?science_local=chatgpt-v1');
     installImageGenerationHttp(app,imageGeneration,assetInfo.moduleVersion??'?science_local=chatgpt-v1');
     installDecisionHttp(app,decisions,assetInfo.moduleVersion??'?science_local=chatgpt-v1');

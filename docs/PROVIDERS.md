@@ -4,7 +4,76 @@
 
 The Anthropic card uses an independently installed, unmodified Claude Code client. This connector requires version 2.1.321 or later in the compatible 2.x series. The official client owns sign-in; Chimeric does not copy its tokens or call its private subscription backend. Connections and each model turn verify that the client uses a Claude subscription rather than API-key or third-party billing.
 
-The picker includes documented client aliases and the reviewed exact identifier `claude-fable-5-2`. Model and effort access still depends on the account and organization. The client returns a validated complete turn, after which Chimeric emits its native text/tool events and executes research tools itself. This route currently accepts text input and is unavailable in Class 2 mode until confinement is verified.
+After a successful connection check or sign-in, Chimeric asks that installed
+client for its model metadata through the official initialization protocol. It
+uses the returned resolved model names and supported reasoning levels in the
+picker. **Refresh models** in the Anthropic connection card requests fresh
+metadata without restarting the app. This operation sends no chat prompt and
+creates no assistant turn. It requires no separate SDK package or download.
+
+For example, a current client may report Opus 5.5, Sonnet 5.5, Haiku 5.5 and
+Fable 5.2. The installed client supplies those versions; they are not global
+defaults or a promise that every account has the same models. Reasoning choices
+also follow the reported metadata, including `low`, `medium`, `high`, `xhigh`
+and `max` when advertised. Client-reported support is separate from an actual
+inference test or the account's current quota.
+
+Public model IDs remain stable when a client resolves an alias to a versioned
+model. Client-specific transport selectors, such as a reported long-context
+variant, are preserved internally rather than being dropped from the request.
+
+The catalog cache stays in memory and is bound to the signed-in account and
+verified client. If a refresh fails, Chimeric can retain a valid catalog from
+that same account and client. Without a valid cache, the catalog is empty and
+**Refresh models** shows the error so it can be retried. A metadata failure does
+not invalidate a successful sign-in, and Chimeric does not invent model names
+or carry another account's catalog into the connection.
+
+The client returns a validated complete turn, after which Chimeric emits its
+native text/tool events and executes research tools itself. This route remains
+unavailable in Class 2 mode until confinement is verified.
+
+### Images and file attachments use the existing research transcript
+
+Claude subscription turns accept text and validated PNG, JPEG, GIF or WebP image
+blocks. Image bytes travel as real CLI image content, not as base64 text for the
+model to interpret. References retain the original transcript message, role and
+tool-call association, including images returned by Chimeric tools. The bounds
+are 5 MiB per image, at most 100 images or pages, and 8 MiB for the complete
+serialized turn, including text and encoded images.
+
+PDF attachments pass through Chimeric's existing `ContentReader` and `toContext`
+path. Local converters extract text and render page images for a vision-capable
+model. Other attachments continue through the existing file tools and converters;
+their format and installed converter determine what is available. The Claude
+adapter does not read arbitrary local paths or upload raw document blocks itself.
+
+A genuine Haiku 5.5 subscription check identified a synthetic red PNG correctly.
+A second check read a random code from a synthetic PDF after that same attachment
+pipeline produced both extracted text and a rendered page. Both used the common
+production transport with no client tools or API-billing fallback. These checks
+verify the transport with Haiku, rather than independently testing every model.
+
+### Context occupancy and billed usage are separate
+
+The reviewed Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.2 model metadata supplies
+a 1,000,000-token context window and a 128,000-token output limit when explicit
+client limits are absent. Valid client-reported limits take priority. The live
+Haiku checks also reported those exact limits in the CLI result.
+
+Terminal CLI usage can include several internal requests. Chimeric keeps that
+aggregate for billing and usage records. The native context meter instead uses
+the latest top-level assistant request's input and cache counts, with terminal
+output as a conservative output allowance. It does not add every internal prompt
+together or include subagent context in the current request's footprint.
+
+Each inference child receives a validated output cap, clamped to the selected
+model's limit, through the documented
+[`CLAUDE_CODE_MAX_OUTPUT_TOKENS` setting](https://code.claude.com/docs/en/env-vars).
+It is not inherited from the host shell or applied to sign-in and model discovery.
+The cap applies per CLI inference request, not to the cumulative output of an
+entire structured turn. Reasoning effort is passed separately using the levels
+reported for the selected model.
 
 [Claude Code 2.1.321 release notes](https://github.com/anthropics/claude-code/releases/tag/v2.1.321) identify the Fable 5.2 client update. A Homebrew stable installation may lag; use the official installation/update instructions for the chosen channel. Updating Chimeric does not silently replace a separately managed client.
 
@@ -25,6 +94,18 @@ Remote URLs require HTTPS. Loopback HTTP is allowed for local services; other HT
 ## Discovery and manual IDs
 
 Discovery calls the provider's `/models` endpoint with the configured credential. A provider can instead list model IDs in manual mode. Each model receives a qualified ID in the form `provider-id::model-id`. The model catalog records mode, text or image input, reasoning support, effort levels, context limits, and whether capabilities were verified.
+
+Chat selectors offer compatible, available text-chat models. Dedicated image,
+speech, embedding and OCR models stay registered for their own tools instead of
+appearing as chat choices. In **Connections**, each chat model's **Show in
+selector** checkbox controls its visibility independently of **Pin**. Hiding a
+model removes its pin; pinning it makes it visible again.
+
+Visibility changes do not disable a connection or stop a running request. An
+existing session can retain its selected model's name and reasoning settings as
+a disabled current-model reference after that model is hidden or becomes
+unavailable. Other hidden or incompatible entries are not offered in the menu.
+Unresolved saved model references do not block unrelated preference changes.
 
 Model declarations and observed image support are displayed separately. Discovery recognizes both `input` and `input_modalities`. In Connections, expand a provider and select **Probe image input** for one model or **Probe all chat models**. Probes send a generated PNG containing random digits through the selected connection. They send no research content and use that connection's quota. The same path supports Chat Completions, Responses and the signed-in ChatGPT subscription.
 

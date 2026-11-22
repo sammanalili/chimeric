@@ -251,13 +251,13 @@ test('Japanese Antigravity image settings translate the backend quota and connec
 
 test('managed CLI connections expose model preferences without editable HTTP connection cards',async()=>{
  const managedId='antigravity::gemini-4-argon';
- const normal={id:'api',name:'My API',baseUrl:'https://api.example.com/v1',api:'openai-completions',managed:false,connectionRevision:1,requestTimeoutMs:600000,status:{ready:true},models:[{id:'chat',qualifiedId:'api::chat',name:'API Chat',mode:'chat',input:['text'],available:true}]};
- const managed={id:'antigravity',name:'Antigravity',api:'antigravity-cli',managed:true,baseUrl:'https://antigravity.local.invalid',connectionRevision:1,status:{ready:true},models:[{id:'gemini-4-argon',qualifiedId:managedId,name:'Gemini 4 Argon',mode:'chat',input:['text'],available:true}]};
- let data:any={revision:1,connections:[normal,managed],roles:{},headlineModels:[],selectedModel:'api::chat',probeJobs:[]};
+ const normal={id:'api',name:'My API',baseUrl:'https://api.example.com/v1',api:'openai-completions',managed:false,connectionRevision:1,requestTimeoutMs:600000,status:{ready:true},models:[{id:'chat',qualifiedId:'api::chat',name:'API Chat',mode:'chat',input:['text'],available:true,selectorEligible:true}]};
+ const managed={id:'antigravity',name:'Antigravity',api:'antigravity-cli',managed:true,baseUrl:'https://antigravity.local.invalid',connectionRevision:1,status:{ready:true},models:[{id:'gemini-4-argon',qualifiedId:managedId,name:'Gemini 4 Argon',mode:'chat',input:['text'],available:true,selectorEligible:true}]};
+ let data:any={revision:1,connections:[normal,managed],roles:{},headlineModels:[],hiddenModels:[],selectedModel:'api::chat',probeJobs:[]};
  const ui=harness('provider-settings.js','ModelConnections',(path,options)=>{
   if(path==='/api/csrf')return response({});
   if(path==='/api/models/selection'&&options.method==='PUT'){data={...data,selectedModel:JSON.parse(options.body).model};return response({})}
-  if(path==='/api/local/connections/settings'&&options.method==='PUT'){const body=JSON.parse(options.body);data={...data,revision:data.revision+1,roles:body.roles,headlineModels:body.headlineModels};return response({})}
+  if(path==='/api/local/connections/settings'&&options.method==='PUT'){const body=JSON.parse(options.body);data={...data,revision:data.revision+1,roles:body.roles,headlineModels:body.headlineModels,hiddenModels:body.hiddenModels??data.hiddenModels};return response({})}
   return response(data);
  });
  await ui.mount();
@@ -266,23 +266,33 @@ test('managed CLI connections expose model preferences without editable HTTP con
  expect(ui.all().filter(node=>node.type==='button'&&ui.text(node)==='Remove connection')).toHaveLength(1);
  const preferences=ui.control('managed-model-preferences');expect(ui.text(preferences)).toContain('Antigravity · Gemini 4 Argon');
  expect(ui.text(preferences)).not.toContain('Edit');expect(ui.text(preferences)).not.toContain('Refresh models');expect(ui.text(preferences)).not.toContain('Probe');
- const pin=ui.all(preferences).find(node=>node.type==='button'&&ui.text(node)==='Pin')!;await pin.props.onClick();ui.render();
+ const pin=ui.all(preferences).find(node=>node.type==='button'&&ui.text(node)==='Pin')!;expect(pin.props.disabled).toBe(false);await pin.props.onClick();ui.render();
  const headline=ui.requests.find(entry=>entry.path==='/api/local/connections/settings'&&entry.options.method==='PUT')!;
- expect(JSON.parse(headline.options.body)).toEqual({expectedRevision:1,roles:{},headlineModels:[managedId]});
+ expect(JSON.parse(headline.options.body)).toEqual({expectedRevision:1,roles:{},headlineModels:[managedId],hiddenModels:[]});
+ const visibility=()=>ui.all(ui.control('managed-model-preferences')).find(node=>node.type==='input'&&node.props['data-testid']==='model-selector-visibility')!;
+ expect(visibility().props.checked).toBe(true);expect(visibility().props.disabled).toBe(false);
+ await visibility().props.onChange({target:{checked:false}});ui.render();
+ const hide=ui.requests.filter(entry=>entry.path==='/api/local/connections/settings'&&entry.options.method==='PUT').at(-1)!;
+ expect(JSON.parse(hide.options.body)).toEqual({expectedRevision:2,roles:{},headlineModels:[],hiddenModels:[managedId]});
+ expect(visibility().props.checked).toBe(false);expect(data.headlineModels).toEqual([]);
+ const repin=ui.all(ui.control('managed-model-preferences')).find(node=>node.type==='button'&&ui.text(node)==='Pin')!;expect(repin.props.disabled).toBe(false);await repin.props.onClick();ui.render();
+ const show=ui.requests.filter(entry=>entry.path==='/api/local/connections/settings'&&entry.options.method==='PUT').at(-1)!;
+ expect(JSON.parse(show.options.body)).toEqual({expectedRevision:3,roles:{},headlineModels:[managedId],hiddenModels:[]});
+ expect(visibility().props.checked).toBe(true);expect(data.hiddenModels).toEqual([]);
  const roles=ui.all().filter(node=>node.type==='select'&&ui.all(node).some(option=>option.type==='option'&&option.props.value===managedId));expect(roles).toHaveLength(3);
  roles[0].props.onChange({target:{value:managedId}});ui.render();await ui.button('Save background models').props.onClick();ui.render();
  const settings=ui.requests.filter(entry=>entry.path==='/api/local/connections/settings'&&entry.options.method==='PUT').at(-1)!;
- expect(JSON.parse(settings.options.body)).toEqual({expectedRevision:2,roles:{small:managedId},headlineModels:[managedId]});
+ expect(JSON.parse(settings.options.body)).toEqual({expectedRevision:4,roles:{small:managedId},headlineModels:[managedId]});
  const defaults=ui.all(ui.control('managed-model-preferences')).find(node=>node.type==='button'&&ui.text(node)==='Use as default')!;await defaults.props.onClick();ui.render();
  const selection=ui.requests.find(entry=>entry.path==='/api/models/selection')!;expect(JSON.parse(selection.options.body)).toEqual({model:managedId});
  expect(ui.all(ui.control('managed-model-preferences')).some(node=>node.type==='button'&&ui.text(node)==='Default'&&node.props.disabled)).toBe(true);
  expect(ui.text()).not.toContain('antigravity.local.invalid');
- for(const entry of [headline,settings,selection])expect(entry.options.headers['x-operon-csrf']).toBe('token/one');
+ for(const entry of [headline,hide,show,settings,selection])expect(entry.options.headers['x-operon-csrf']).toBe('token/one');
  ui.unmount();
 });
 
 test('a managed-only registry keeps the CLI marker and connection editing out of the rendered settings',async()=>{
- const model={id:'opus-5-5',qualifiedId:'antigravity::opus-5-5',name:'Claude Opus 5.5',mode:'chat',input:['text'],available:true};
+ const model={id:'opus-5-5',qualifiedId:'antigravity::opus-5-5',name:'Claude Opus 5.5',mode:'chat',input:['text'],available:true,selectorEligible:true};
  const data={revision:1,connections:[{id:'antigravity',name:'Antigravity',api:'antigravity-cli',managed:true,baseUrl:'https://antigravity.local.invalid',models:[model]}],roles:{},headlineModels:[model.qualifiedId],selectedModel:model.qualifiedId,probeJobs:[]};
  const ui=harness('provider-settings.js','ModelConnections',()=>response(data));await ui.mount();
  expect(ui.text()).not.toContain('antigravity.local.invalid');expect(ui.all().some(node=>node.type==='button'&&['Edit','Remove connection','Probe image input','Probe all chat models'].includes(ui.text(node)))).toBe(false);
@@ -291,7 +301,7 @@ test('a managed-only registry keeps the CLI marker and connection editing out of
 });
 
 test('each API connection mounts its own Class 2 permission control without duplicating subscription or managed cards',async()=>{
- const api=(id:string)=>({id,name:'Synthetic '+id,api:'openai-completions',baseUrl:'https://'+id+'.example.invalid/v1',models:[{id:'chat',qualifiedId:id+'::chat',name:'Synthetic chat',mode:'chat',input:['text']}],status:{ready:true},hasCredential:true});
+ const api=(id:string)=>({id,name:'Synthetic '+id,api:'openai-completions',baseUrl:'https://'+id+'.example.invalid/v1',models:[{id:'chat',qualifiedId:id+'::chat',name:'Synthetic chat',mode:'chat',input:['text'],selectorEligible:true}],status:{ready:true},hasCredential:true});
  const data={revision:1,connections:[api('api-one'),{...api('api-two'),api:'anthropic-messages'},{...api('managed'),managed:true,api:'claude-code'},{...api('subscription'),subscription:true}],roles:{},headlineModels:[],selectedModel:'api-one::chat',probeJobs:[]};
  const ui=harness('provider-settings.js','ModelConnections',()=>response(data));await ui.mount();
  const controls=ui.all().filter(node=>node.type==='ConnectionEligibility');expect(controls.map(node=>node.props.connectionId)).toEqual(['api-one','api-two']);

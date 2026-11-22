@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {z} from 'zod';
 import {Registry,Configuration,Provider,atomicJson,type ModelEntry} from './registry';
+import {chatSelectorEligible} from './catalog';
 import {probeImage,type ImageProbeEvidence} from './model-probe';
 type ProbeJob={id:string;providerId:string;status:'running'|'completed'|'cancelled';total:number;completed:number;createdAt:number;finishedAt?:number};
 type ActiveProbeJob={public:ProbeJob;controller:AbortController;done:Promise<void>;resolve:()=>void};
@@ -55,16 +56,17 @@ export class ProviderManager {
   refreshSubscriptions(){return this.serial(async()=>{const ids=Object.entries(this.registry.config.providers).filter(([,p])=>p.api==='openai-codex-responses'||p.api==='claude-code').map(([id])=>id);if(ids.length)await this.registry.refresh(true,ids);this.notify();});}
   snapshot(){
     const r=this.registry;
-    const roleModels=[...r.models.values()].filter(m=>m.mode==='chat').map(m=>({qualifiedId:m.qualifiedId,name:m.name,provider:m.providerName,available:m.available!==false&&m.subscriptionAvailable!==false}));
+    const roleModels=[...r.models.values()].filter(m=>m.mode==='chat'&&m.input.includes('text')).map(m=>({qualifiedId:m.qualifiedId,name:m.name,provider:m.providerName,available:chatSelectorEligible(r,m)}));
     for(const id of Object.values(r.config.roles))if(!roleModels.some(model=>model.qualifiedId===id)){
-      try{const model=r.resolve(id);roleModels.push({qualifiedId:id,name:model.name+(model.defaultReasoningEffort?' ('+model.defaultReasoningEffort+')':''),provider:model.providerName,available:model.available!==false&&model.subscriptionAvailable!==false})}catch{roleModels.push({qualifiedId:id,name:id,provider:'Unavailable',available:false})}
+      try{const model=r.resolve(id);roleModels.push({qualifiedId:id,name:model.name+(model.defaultReasoningEffort?' ('+model.defaultReasoningEffort+')':''),provider:model.providerName,available:chatSelectorEligible(r,model)})}catch{roleModels.push({qualifiedId:id,name:id,provider:'Unavailable',available:false})}
     }
-    return {revision:r.revision,catalogRevision:this.catalogRevision,selectedModel:r.currentSelection().model,roles:{...r.config.roles},headlineModels:[...new Set(r.config.headlineModels.map(id=>r.canonicalId(id)))],roleModels,probeJobs:[...this.probeJobs.values()].map(job=>({...job.public})),
+    const hiddenModels=[...new Set((r.config.hiddenModels??[]).map(id=>r.canonicalId(id)))];
+    return {revision:r.revision,catalogRevision:this.catalogRevision,selectedModel:r.currentSelection().model,roles:{...r.config.roles},headlineModels:[...new Set(r.config.headlineModels.map(id=>r.canonicalId(id)))],hiddenModels,roleModels,probeJobs:[...this.probeJobs.values()].map(job=>({...job.public})),
       connections:Object.entries(r.config.providers).map(([id,p])=>({
         id,name:p.name,baseUrl:p.baseUrl,api:p.api,enabled:p.enabled,mode:p.models?'manual':'discover',connectionRevision:p.revision,
         allowInsecureHttp:p.allowInsecureHttp,requestTimeoutMs:p.requestTimeoutMs,
         hasCredential:!!r.getPrivateCredential(id),subscription:p.api==='openai-codex-responses',managed:p.api==='antigravity-cli'||p.api==='antigravity-http'||p.api==='claude-code',status:r.statuses[id],...(p.api==='openai-codex-responses'?{modelDiscovery:r.subscription?.modelCatalog.status()}:{}),
-        models:[...r.models.values()].filter(m=>m.provider===id).map(m=>({id:m.id,qualifiedId:m.qualifiedId,name:m.name,input:m.input,declaredInput:m.declaredInput??m.input,imageProbe:m.imageProbe,reasoning:m.reasoning,efforts:m.efforts,mode:m.mode,available:m.subscriptionAvailable!==false&&m.available!==false,capabilitiesVerified:m.capabilitiesVerified})),
+        models:[...r.models.values()].filter(m=>m.provider===id).map(m=>({id:m.id,qualifiedId:m.qualifiedId,name:m.name,input:m.input,declaredInput:m.declaredInput??m.input,imageProbe:m.imageProbe,reasoning:m.reasoning,efforts:m.efforts,mode:m.mode,available:m.subscriptionAvailable!==false&&m.available!==false,selectorEligible:chatSelectorEligible(r,m),showInSelector:!hiddenModels.includes(m.qualifiedId),capabilitiesVerified:m.capabilitiesVerified})),
       })),...(this.cleanupWarning?{warning:this.cleanupWarning}:{}),};
   }
   private credentialsFor(config:Configuration){
@@ -148,17 +150,39 @@ export class ProviderManager {
     if(p.api==='antigravity-http')throw new ProviderChangeError('Disconnect the Antigravity subscription using its separate sign-in controls.');
     if(p.api==='openai-codex-responses')throw new ProviderChangeError('Disconnect ChatGPT using its separate sign-in controls.');
     if(input.resetRoles)for(const [role,model]of Object.entries(config.roles))if(model.startsWith(input.id+'::'))delete config.roles[role];
-    delete config.providers[input.id];config.headlineModels=config.headlineModels.filter(id=>!id.startsWith(input.id+'::'));
+    delete config.providers[input.id];config.headlineModels=config.headlineModels.filter(id=>!id.startsWith(input.id+'::'));config.hiddenModels=(config.hiddenModels??[]).filter(id=>!id.startsWith(input.id+'::'));
     const candidate=this.withServices(new Registry(config,this.registry.profileDir,this.credentialsFor(config)));candidate.models=new Map([...this.registry.models].filter(([,m])=>m.provider!==input.id));
     candidate.statuses={...this.registry.statuses};delete candidate.statuses[input.id];
     this.ensureReferences(candidate);this.commit(candidate);return this.snapshot();
   })}
   settings(raw:unknown){return this.serial(async()=>{
-    const input=z.object({expectedRevision:z.number().int().nonnegative(),roles:z.record(z.string(),z.string()),headlineModels:z.array(z.string()).max(100)}).parse(raw);
+    const input=z.object({expectedRevision:z.number().int().nonnegative(),roles:z.record(z.string(),z.string()),headlineModels:z.array(z.string()).max(100),hiddenModels:z.array(z.string().min(1).max(1024)).max(4096).optional()}).parse(raw);
     this.check(input.expectedRevision);
     if(Object.keys(input.roles).some(k=>!['small','medium','large'].includes(k)))throw new ProviderChangeError('Unknown background model role.');
-    for(const id of [...Object.values(input.roles),...input.headlineModels])this.registry.resolve(id);
-    const config=Configuration.parse({...this.registry.config,roles:input.roles,headlineModels:[...new Set(input.headlineModels)]});
+    const r=this.registry;
+    const roles=Object.fromEntries(Object.entries(input.roles).map(([role,id])=>{
+      if(r.config.roles[role]===id)return [role,id];
+      const model=r.resolve(id);if(!chatSelectorEligible(r,model))throw new ProviderChangeError('Choose an available chat model for this background role.');
+      return [role,model.qualifiedId];
+    }));
+    const references=(ids:string[],previous:string[],requireAvailable:boolean)=>{
+      const retained=new Set(previous.map(id=>r.canonicalId(id)));
+      return [...new Set(ids.map(id=>{
+        const canonical=r.canonicalId(id);if(retained.has(canonical))return canonical;
+        const model=r.resolve(id);
+        if(requireAvailable&&!chatSelectorEligible(r,model))throw new ProviderChangeError('Only available chat models can be pinned in the selector.');
+        return model.qualifiedId;
+      }))];
+    };
+    let headlineModels=references(input.headlineModels,r.config.headlineModels,true);
+    const oldHidden=r.config.hiddenModels??[];
+    let hiddenModels=input.hiddenModels===undefined?[...new Set(oldHidden.map(id=>r.canonicalId(id)))]:references(input.hiddenModels,oldHidden,false);
+    const oldPins=new Set(r.config.headlineModels.map(id=>r.canonicalId(id))),oldHiddenIds=new Set(oldHidden.map(id=>r.canonicalId(id)));
+    const newPins=new Set(headlineModels.filter(id=>!oldPins.has(id))),newHidden=new Set(hiddenModels.filter(id=>!oldHiddenIds.has(id)));
+    if([...newPins].some(id=>newHidden.has(id)))throw new ProviderChangeError('Choose either pinning or hiding a model in one change.');
+    hiddenModels=hiddenModels.filter(id=>!newPins.has(id));
+    const hidden=new Set(hiddenModels);headlineModels=headlineModels.filter(id=>!hidden.has(id));
+    const config=Configuration.parse({...r.config,roles,headlineModels,hiddenModels});
     const candidate=this.withServices(new Registry(config,this.registry.profileDir,this.credentialsFor(config)));candidate.models=new Map(this.registry.models);candidate.statuses={...this.registry.statuses};
     this.commit(candidate);return this.snapshot();
   })}

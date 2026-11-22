@@ -24,6 +24,13 @@ const python=process.env.CHIMERIC_PYTHON??['python3.14','python3.13','python3.12
   const program=parse(component,{sourceType:'module'}).program;
   expect(component).toContain('"data-testid":"chimeric-connections"');
   expect(component).toContain('title:tr("Connections")');
+  // Settings renders this shared content inside a nonflex route container.
+  // flex-1 alone cannot bound its height there; the same content also lives
+  // inside the standalone modal's already constrained scroll body.
+  const connections=(program.body as any[]).find(node=>node.type==='FunctionDeclaration'&&node.id?.name==='ChimericConnectionsContent');
+  const props=connections.body.body.find((node:any)=>node.type==='ReturnStatement').argument.arguments[1].properties;
+  const classes=props.find((prop:any)=>prop.key?.name==='className').value.value.split(/\s+/);
+  for(const required of ['h-full','min-h-0','overflow-y-auto','overscroll-contain'])expect(classes).toContain(required);
   // The original generic secret directory was not a model-connection UI and
   // must not remain available behind Chimeric's Connections screen.
   for(const inherited of ['AWS','Google Cloud','Microsoft Azure','NVIDIA API','OpenAlex','Literature access (journals, etc.)','API keys and tokens for services Claude uses on your behalf']){

@@ -1,6 +1,17 @@
 import {test,expect} from 'bun:test';
 import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {Registry} from '../src/registry';import {makeCatalog} from '../src/catalog';
+test('Native context metadata and its label retain one million tokens independently of output limits',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'chimeric-context-'));
+ try{
+  const r=new Registry({providers:{mock:{name:'Mock',baseUrl:'http://127.0.0.1:1/v1',models:[{id:'long-context'}],modelOverrides:{'long-context':{contextWindow:1_000_000,maxTokens:128_000}}}},defaultModel:'mock::long-context'},dir);
+  await r.refresh(false);const entry=r.models.get('mock::long-context')!;
+  entry.api='claude-code';entry.reasoning=true;entry.efforts=['low','medium','high','xhigh','max'];
+  const m=makeCatalog(r).model_selector.catalog.models[0];
+  expect(m.description).toBe('Mock · 1M context');expect(m.max_input_tokens).toBe(1_000_000);expect(m.context_window).toBe(1_000_000);expect(m.max_output_tokens).toBe(128_000);
+  expect(m.thinking?.always_on).toBe(true);expect(m.thinking?.effort_options.map(e=>e.id)).toEqual(['low','medium','high','xhigh','max']);
+ }finally{rmSync(dir,{recursive:true,force:true})}
+});
 test('Native selector receives renderable model sections and complete thinking controls',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'science-menu-'));
  try{const r=new Registry({envFile:'/missing',credentialRefsFile:'/missing',modelMetadataFile:'/missing',providers:{mock:{name:'Mock',baseUrl:'http://127.0.0.1:1/v1',models:[{id:'reasoner'},{id:'other'},{id:'embedding',mode:'embedding'}],modelOverrides:{reasoner:{reasoning:true,compat:{thinkingFormat:"qwen-chat-template"}}}}},defaultModel:'mock::reasoner'},dir);await r.refresh();const c=makeCatalog(r);const m=c.model_selector.catalog.models.find(m=>m.id==='mock::reasoner')!;expect(m.section).toBe('main');expect(c.model_selector.catalog.models.filter(m=>m.section==='main')).not.toHaveLength(0);expect(m.thinking!.effort_options.map(o=>o.id)).toContain('high');expect(m.thinking!.effort_options.map(o=>o.id)).toContain('off');expect(m.thinking!.mode_options).toEqual([]);expect(c.default_effort).toBe('medium');expect(c.model_selector.state.thinking).toEqual({type:'effort',effort:'medium'});expect(c.model_selector.catalog.models.find(m=>m.id==='mock::other')!.section).toBe('overflow')}finally{rmSync(dir,{recursive:true,force:true})}

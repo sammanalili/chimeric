@@ -5,8 +5,8 @@ from pathlib import Path
 
 EXPECTED_BINARY_SHA256 = "15261d747064ae49a124d9e416b0c9e2c1d78285a0b2b04534d394d922b12355"
 EXPECTED_SOURCE_SHA256 = "9fd2e4e942385471ce1000b0f63873c57e2dfd5c768dbcb7b0c917fa227673c7"
-REQUIRED_RUNTIME = ("chimeric.js", "local-runtime.js", "chatgpt-credentials.js", "provider-settings.js", "antigravity-settings.js", "image-generation-settings.js", "decision-settings.js", "usage-indicator.js", "voice-settings.js", "class2-settings.js", "provider-events.js", "protected-resource-view.js", "local_asr.py", "sqliteWorkerEntry.js", "orgsImportWorker.js", "sandbox/gitScanWorker.js", "stallWatchdogEntry.js", "asset-manifest.json", "patch-manifest.json")
-BROWSER_MODULES = frozenset({"chatgpt-credentials.js", "provider-settings.js", "antigravity-settings.js", "image-generation-settings.js", "decision-settings.js", "usage-indicator.js", "voice-settings.js", "class2-settings.js", "provider-events.js", "protected-resource-view.js"})
+REQUIRED_RUNTIME = ("chimeric.js", "local-runtime.js", "chatgpt-credentials.js", "provider-settings.js", "version-settings.js", "antigravity-settings.js", "image-generation-settings.js", "decision-settings.js", "usage-indicator.js", "voice-settings.js", "class2-settings.js", "provider-events.js", "protected-resource-view.js", "local_asr.py", "sqliteWorkerEntry.js", "orgsImportWorker.js", "sandbox/gitScanWorker.js", "stallWatchdogEntry.js", "asset-manifest.json", "patch-manifest.json")
+BROWSER_MODULES = frozenset({"chatgpt-credentials.js", "provider-settings.js", "version-settings.js", "antigravity-settings.js", "image-generation-settings.js", "decision-settings.js", "usage-indicator.js", "voice-settings.js", "class2-settings.js", "provider-events.js", "protected-resource-view.js"})
 CLASS2_REQUIRED_BOUNDARIES = (
     "native-scope-task", "native-scope-metadata", "native-scope-sdk-fetch", "native-scope-runner", "native-scope-agent-job",
     "native-policy-registry-tool", "native-policy-host-call", "native-policy-kernel", "native-policy-tool-dispatch", "native-policy-compute-dispatch", "native-policy-network-grant", "native-policy-process", "native-policy-shell",

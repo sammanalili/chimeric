@@ -74,7 +74,7 @@ for name, data in sorted(science_skills.items()):
 for path in [Path(__file__), Path(__file__).with_name('brand-frontend.mjs'), Path(__file__).with_name('native-voice-context.ts'), Path(__file__).with_name('native-browser-policy.ts'), Path(__file__).with_name('native-upload-context.ts'), Path(__file__).with_name('ui_style.py'),Path(__file__).with_name('brand_skill_resources.py'),resources/'product-self-knowledge.md',
              Path(__file__).with_name('brand_product_resources.py'), Path(__file__).with_name('product-branding.ts'),
              *[resources / name for name in ['atom-component.js.fragment', 'chimeric-dna.json', 'chimeric-favicon.svg',
-                 'chimeric-icon-192.png', 'chimeric-icon-512.png', 'provider-settings.js', 'chatgpt-credentials.js', 'ja.json', 'chimeric-ui.css', 'artifact-markdown.js',
+                 'chimeric-icon-192.png', 'chimeric-icon-512.png', 'provider-settings.js', 'version-settings.js', 'chatgpt-credentials.js', 'ja.json', 'chimeric-ui.css', 'artifact-markdown.js',
                  'chimeric-atom-3d.svg', 'chimeric-atom-3d-static.svg', 'antigravity-settings.js', 'image-generation-settings.js', 'decision-settings.js', 'voice-settings.js', 'usage-indicator.js', 'class2-settings.js', 'provider-events.js', 'protected-resource-view.js']],resources.parent/'bun.lock']:
     version_hash.update(path.name.encode() + b'\0' + path.read_bytes() + b'\0')
 version = '?chimeric=' + version_hash.hexdigest()[:16]

@@ -1,4 +1,4 @@
-# The 0.3.0-rc.8 source publication has a separate audit
+# The 0.3.0-rc.9 source publication has a separate audit
 
 This audit distinguishes the public integration source from a packaged Chimeric
 release. Publishing a checked source export does not approve native runtime
@@ -13,7 +13,7 @@ The strict source check also checks local Markdown links and credential patterns
 
 The current source regression and export results are recorded in
 [SOURCE-VERIFICATION.json](SOURCE-VERIFICATION.json). That record identifies the
-0.3.0-rc.8 verification scope, including declared fixture skips. Earlier test
+0.3.0-rc.9 verification scope, including declared fixture skips. Earlier test
 counts and packaged-candidate scans do not describe the new source bytes.
 
 The release's `SOURCE-MANIFEST.json` records the selected file hashes. The

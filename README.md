@@ -6,10 +6,24 @@ Chimeric is a local research workspace that keeps the original research runtime 
 
 The public source contains the Chimeric integration, build tools, tests, and documentation. A compatible runtime is supplied separately as a versioned dependency with its original provenance. Runtime binaries, private profiles, API keys and personal research data are excluded from this publication.
 
-## Version 0.3.0-rc.8 fixes chat rendering and image references
+## Version 0.3.0-rc.9 updates model discovery and settings
 
 This source prerelease includes the fixes made after 0.3.0-rc.2:
 
+- Settings → Connections scrolls within the visible panel, including long model lists.
+- Claude Code model pins and default selection retain their exact connection and model. General settings displays the installed Chimeric version.
+- Chat selectors offer compatible, available text models. Each chat model has a
+  separate **Show in selector** setting in Connections; image and speech models
+  remain in their dedicated selectors.
+- Anthropic subscription models and reasoning levels come from the installed
+  official client. They load after a successful connection check or sign-in;
+  **Refresh models** requests current client metadata without restarting Chimeric.
+- Claude subscription turns carry real image blocks and converted file
+  attachments. Haiku 5.5 passed synthetic PNG and PDF checks through the production
+  path. Reviewed Claude metadata exposes a 1M context window and 128k output limit;
+  context occupancy stays separate from aggregate billed usage, and each
+  inference request receives its own bounded output cap. See
+  [input formats and limits](docs/PROVIDERS.md#images-and-file-attachments-use-the-existing-research-transcript).
 - Chat messages render paragraphs, bold text and lists normally. Artifact image
   handles resolve to their saved local images, while examples inside code and
   editable text remain literal.

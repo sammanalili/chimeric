@@ -1,17 +1,19 @@
 import {existsSync,readFileSync,mkdirSync,writeFileSync,renameSync,chmodSync} from 'node:fs';
 import {join,dirname,isAbsolute} from 'node:path';
+import {createHash} from 'node:crypto';
 import {z} from 'zod';
 import {ClaudeCodeError,ClaudeCodeModelProvider,claudeCodeAuthorizationUrl,
  findClaudeCodeExecutable,inspectClaudeCodeExecutable,runClaudeCodeCommand,type ClaudeCodeProviderOptions} from './claude-code-provider';
+import {discoverClaudeCodeModels,type ClaudeCodeDiscoveredModel} from './claude-code-model-discovery';
 export {ClaudeCodeError};
 export const CLAUDE_CODE_PROVIDER_ID='claude-code';
 // An identity marker. Chimeric never calls an HTTP service at this address.
 export const CLAUDE_CODE_BASE_URL='https://claude-code.local.invalid';
-export type ClaudeCodeCatalogModel={id:string;name:string;input:['text'];verified:false;reasoning:true;reasoningEfforts:Record<string,string>;reasoningEffortsVerified:false;reasoningEffortsSource:'official-cli-options';contextWindow?:number;maxTokens?:number;availability:'unknown'};
-const aliases=[['default','Claude Default'],['opus','Claude Opus'],['sonnet','Claude Sonnet'],['haiku','Claude Haiku'],['claude-fable-5-2','Fable 5.2']];
+export type ClaudeCodeCatalogModel=Omit<ClaudeCodeDiscoveredModel,'transportId'>&{maxTokens?:number};
 const actionSchema=z.object({action:z.enum(['check','connect','refresh','disconnect','login','cancel-login']),executable:z.string().min(1).max(4096).refine(isAbsolute,'Use an absolute executable path.').optional()}).strict();
 export type ClaudeCodeModelsOptions=ClaudeCodeProviderOptions&{
  inspect?:typeof inspectClaudeCodeExecutable;run?:typeof runClaudeCodeCommand;
+ discover?:typeof discoverClaudeCodeModels;now?:()=>number;
  driver?:(options:ClaudeCodeProviderOptions)=>ClaudeCodeModelProvider;
 };
 function atomic(path:string,value:unknown){
@@ -22,7 +24,8 @@ function normalizeAuth(text:string){
  let value:any;try{value=JSON.parse(text)}catch{throw new ClaudeCodeError('The official client returned invalid authentication status.',409)}
  if(!value||typeof value!=='object'||Array.isArray(value)||typeof value.loggedIn!=='boolean')throw new ClaudeCodeError('The official client returned invalid authentication status.',409);
  const method=typeof value.authMethod==='string'&&['none','claude.ai','oauth_token','api_key','api_key_helper','third_party'].includes(value.authMethod)?value.authMethod:'unknown';
- return {connected:value.loggedIn,authMethod:method};
+ const identityFields=[method,...['email','orgId','organizationId','apiProvider'].map(key=>typeof value[key]==='string'?value[key]:null)];
+ return {connected:value.loggedIn,authMethod:method,identity:createHash('sha256').update(JSON.stringify(identityFields)).digest('hex')};
 }
 /** Optional model connection; the unmodified official CLI owns all authentication. */
 export class ClaudeCodeModels{
@@ -33,6 +36,9 @@ export class ClaudeCodeModels{
  private login?:{phase:'waiting'|'connected'|'cancelled'|'error';authorizationUrl?:string};
  private generation=0;private closed=false;private active?:AbortController;private pending=new Set<Promise<unknown>>();
  private driver?:ClaudeCodeModelProvider;private listeners=new Set<()=>void>();
+ private authBinding?:string;
+ private modelCache?:{binding:string;updatedAt:number;models:ClaudeCodeDiscoveredModel[]};
+ private discoveryState:'idle'|'refreshing'|'ready'|'error'='idle';private discoveryError?:string;
  constructor(profile:string,private options:ClaudeCodeModelsOptions={}){
   this.file=join(profile,'local-auth','claude-code','connection.json');this.executable=options.executable??findClaudeCodeExecutable();this.installed=Boolean(this.executable);
   if(existsSync(this.file))try{
@@ -50,18 +56,13 @@ export class ClaudeCodeModels{
  private async revoke(){const generation=++this.generation;this.active?.abort();this.active=undefined;const driver=this.driver;this.driver=undefined;if(driver)await driver.close();return generation}
  available(){return !this.closed&&this.enabled&&this.connected&&this.authState==='ready'}
  catalog():ClaudeCodeCatalogModel[]{
-  if(!this.available())return [];
-  // These are documented official aliases, not a discovered entitlement catalog.
-  // The client may cap effort under organization policy; verified remains false.
-  return aliases.map(([id,name])=>({id,name,input:['text'],verified:false,reasoning:true,availability:'unknown',
-   ...id==='claude-fable-5-2'?{contextWindow:1_000_000,maxTokens:128_000}:{},
-   reasoningEffortsVerified:false,reasoningEffortsSource:'official-cli-options',
-   reasoningEfforts:Object.fromEntries(['low','medium','high','xhigh','max'].map(effort=>[effort,effort]))}));
+  if(!this.available()||this.modelCache?.binding!==this.authBinding)return [];
+  return this.modelCache.models.map(({transportId,...model})=>structuredClone(model));
  }
  status(){return {installed:this.installed,executable:this.executable,version:this.version,signatureVerified:this.signatureVerified,
   enabled:this.enabled,connected:this.connected,ready:this.available(),authState:this.authState,authMethod:this.authMethod,
-  operation:this.operation,error:this.error,detail:this.error??(this.available()?'The official client handles sign-in and inference. Model aliases and effort are subject to your account and organization limits.':'Check the official client or sign in through its own authorization flow.'),
-  login:this.login?{...this.login}:undefined,models:this.catalog(),class2Supported:false,transport:'official-cli',modelDiscovery:{state:'aliases',verified:false,count:this.catalog().length}}}
+  operation:this.operation,error:this.error,detail:this.error??this.discoveryError??(this.available()?'The official client supplies the model catalog and handles sign-in and inference.':'Check the official client or sign in through its own authorization flow.'),
+  login:this.login?{...this.login}:undefined,models:this.catalog(),class2Supported:false,transport:'official-cli',modelDiscovery:{state:this.discoveryState,verified:this.catalog().length>0,count:this.catalog().length,...this.modelCache?.binding===this.authBinding?{updatedAt:this.modelCache?.updatedAt}:{},...this.discoveryError?{message:this.discoveryError}:{}}}}
  executablePath(){return this.executable}
  connectionGeneration(){return this.generation}
  async restore(){if(this.enabled)try{await this.check()}catch{/* Status retains the actionable error. */}return this.status()}
@@ -71,9 +72,23 @@ export class ClaudeCodeModels{
   if(input.action==='disconnect')return this.disconnect();
   if(input.action==='cancel-login'){await this.revoke();this.operation=null;this.login={phase:'cancelled'};this.changed();return this.status()}
   if(input.action==='login')return this.startLogin();
-  return this.check();
+  return this.check(input.action==='refresh');
  }
- private async check(){
+ private async refreshCatalog(generation:number,signal:AbortSignal,force:boolean){
+  const binding=this.authBinding!,now=(this.options.now??Date.now)();
+  if(this.modelCache?.binding!==binding)this.modelCache=undefined;
+  if(!force&&this.modelCache&&now-this.modelCache.updatedAt<300000){this.discoveryState='ready';this.discoveryError=undefined;return}
+  this.discoveryState='refreshing';this.discoveryError=undefined;this.changed();
+  try{
+   const models=await (this.options.discover??discoverClaudeCodeModels)(this.configuration(),signal);
+   if(this.closed||generation!==this.generation||signal.aborted||binding!==this.authBinding)return;
+   this.modelCache={binding,updatedAt:(this.options.now??Date.now)(),models:structuredClone(models)};this.discoveryState='ready';
+  }catch(error){
+   if(this.closed||generation!==this.generation||signal.aborted)return;
+   this.discoveryState='error';this.discoveryError=error instanceof ClaudeCodeError?error.message:'The official client could not refresh its models. Try Refresh models again.';
+  }
+ }
+ private async check(forceDiscovery=false){
   const generation=await this.revoke();if(this.closed)throw new ClaudeCodeError('The official-client connection is stopping.',409);if(generation!==this.generation)return this.status();
   const controller=new AbortController();this.active=controller;this.operation='checking';this.error=undefined;this.changed();
   return this.track((async()=>{try{
@@ -88,11 +103,13 @@ export class ClaudeCodeModels{
    this.authMethod=value.authMethod;
    if(value.connected&&value.authMethod!=='claude.ai')throw new ClaudeCodeError('This connection requires the official client signed in with your Claude subscription. Its current authentication method may use API billing or another provider; no model request was sent.',409);
    this.connected=value.connected;this.authState=value.connected?'ready':'signed_out';this.enabled=value.connected;
+   this.authBinding=value.connected?createHash('sha256').update(JSON.stringify([value.identity,this.executable,this.version])).digest('hex'):undefined;
+   if(!value.connected){this.modelCache=undefined;this.discoveryState='idle';this.discoveryError=undefined}
    if(this.login&&value.connected)this.login={phase:'connected'};
-   this.persist();return this.status();
+   this.persist();if(value.connected)await this.refreshCatalog(generation,controller.signal,forceDiscovery);return this.status();
   }catch(error){
    if(generation!==this.generation||this.closed)return this.status();
-   this.connected=false;this.enabled=false;this.authState='error';this.error=error instanceof ClaudeCodeError?error.message:'The official client could not check this connection. Verify its installation and sign-in.';this.persist();return this.status();
+   this.connected=false;this.enabled=false;this.authState='error';this.authBinding=undefined;this.modelCache=undefined;this.discoveryState='idle';this.discoveryError=undefined;this.error=error instanceof ClaudeCodeError?error.message:'The official client could not check this connection. Verify its installation and sign-in.';this.persist();return this.status();
   }finally{if(generation===this.generation){this.operation=null;this.active=undefined;this.changed()}}})()).then(()=>this.status());
  }
  private async startLogin(){
@@ -121,12 +138,13 @@ export class ClaudeCodeModels{
   }catch(error){if(generation===this.generation&&!this.closed){this.login={phase:controller.signal.aborted?'cancelled':'error'};this.authState='error';this.error=error instanceof ClaudeCodeError?error.message:'The official sign-in did not complete. Check the official client.';this.operation=null;this.active=undefined;this.changed()}}})();
   this.track(pending);return this.status();
  }
- private async disconnect(){await this.revoke();this.enabled=false;this.connected=false;this.authState='unknown';this.authMethod='unknown';this.operation=null;this.login=undefined;this.error=undefined;this.persist();this.changed();return this.status()}
+ private async disconnect(){await this.revoke();this.enabled=false;this.connected=false;this.authState='unknown';this.authMethod='unknown';this.authBinding=undefined;this.modelCache=undefined;this.discoveryState='idle';this.discoveryError=undefined;this.operation=null;this.login=undefined;this.error=undefined;this.persist();this.changed();return this.status()}
  stream(model:any,context:any,options:any={}){
   if(options.dataClass==='class2')throw new ClaudeCodeError('Claude Code is unavailable in Class 2 mode until its complete confinement is verified.',403);
   if(!this.available())throw new ClaudeCodeError('Check the official-client connection in Settings → Connections before using this model.',409);
   if((model.claudeCodeExecutable!==undefined&&model.claudeCodeExecutable!==this.executable)||(model.claudeCodeGeneration!==undefined&&model.claudeCodeGeneration!==this.generation))throw new ClaudeCodeError('The official-client connection changed. Choose a current model and start this turn again.',409);
-  this.driver??=(this.options.driver??(options=>new ClaudeCodeModelProvider(options)))(this.configuration());
+  if(this.modelCache?.binding!==this.authBinding||!this.modelCache?.models.some(entry=>entry.id===model.id))throw new ClaudeCodeError('Refresh the official client models and choose a current model before starting this turn.',409);
+  this.driver??=(this.options.driver??(options=>new ClaudeCodeModelProvider(options)))({...this.configuration(),modelCatalog:this.modelCache.models.map(({id,transportId,resolvedModel,reasoningEfforts})=>({id,transportId,resolvedModel,efforts:Object.keys(reasoningEfforts)}))});
   return this.driver.stream(model,context,options);
  }
  async close(){if(this.closed)return;this.closed=true;await this.revoke();await Promise.allSettled(this.pending);this.listeners.clear()}

@@ -798,5 +798,8 @@
   "Custom prices": "手入力の料金",
   "Provider metadata": "接続先のモデル情報",
   "Published prices": "公開料金",
-  "Class 2 is unavailable until browser and cross-chat file isolation are verified for this build.": "このビルドでは、ブラウザーとチャット間のファイル分離を確認するまでクラス 2 を有効にできません。"
+  "Class 2 is unavailable until browser and cross-chat file isolation are verified for this build.": "このビルドでは、ブラウザーとチャット間のファイル分離を確認するまでクラス 2 を有効にできません。",
+  "Show in selector": "モデル選択欄に表示",
+  "Selector visibility updated.": "モデル選択欄の表示設定を更新しました。",
+  "Hidden from the model selector.": "モデル選択欄では非表示です。"
 }

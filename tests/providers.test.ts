@@ -39,6 +39,35 @@ test('A restored API-key connection never sends the keyless sentinel when its en
   }finally{f.close()}
 });
 
+test('Qualified Claude subscription models retain their exact routes when resolved, pinned and selected',async()=>{
+  const f=workspace();
+  try{
+    const aliases=['default','opus','sonnet','haiku','claude-fable-5-2'];
+    const registry=new Registry({providers:{
+      api:{name:'Synthetic API',baseUrl:'https://example.invalid/v1',api:'openai-completions',models:[{id:'fixture'}]},
+      'claude-code':{name:'Anthropic subscription',baseUrl:'https://claude-code.local.invalid',api:'claude-code'},
+    },defaultModel:'api::fixture',roles:{small:'api::fixture',medium:'api::fixture',large:'api::fixture'}},f.dir);
+    registry.claudeCode={available:()=>true,catalog:()=>aliases.map(id=>({id,name:id})),executablePath:()=>'/synthetic/claude',connectionGeneration:()=>1} as any;
+    await registry.refresh(false);
+    const manager=new ProviderManager(registry),qualified=aliases.map(id=>'claude-code::'+id);
+    for(const id of qualified){
+      expect(registry.resolve(id).qualifiedId).toBe(id);
+      expect(registry.canonicalId(id)).toBe(id);
+      expect(registry.select(id).defaultModel).toBe(id);
+    }
+    const pinned=await manager.settings({expectedRevision:0,roles:registry.config.roles,headlineModels:qualified});
+    expect(pinned.headlineModels).toEqual(qualified);
+    expect(registry.config.headlineModels).toEqual(qualified);
+    expect(registry.currentSelection().model).toBe('claude-code::claude-fable-5-2');
+    // Native legacy names still choose configured background roles.
+    for(const id of ['claude-opus-legacy','claude-sonnet-legacy','claude-haiku-legacy','anthropic/claude-opus-legacy']){
+      expect(registry.resolve(id).qualifiedId).toBe('api::fixture');
+    }
+    // An unavailable qualified route cannot fall back to another provider.
+    expect(()=>registry.resolve('claude-code::not-advertised')).toThrow('unknown or unavailable model');
+  }finally{f.close()}
+});
+
 test('A newly registered custom-prefix model runs through the existing bridge and stores no plaintext key',async()=>{
   const seen:any[]=[];
   const upstream=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){seen.push({path:new URL(request.url).pathname,key:request.headers.get('authorization'),body:await request.json()});return completion('READY')}});

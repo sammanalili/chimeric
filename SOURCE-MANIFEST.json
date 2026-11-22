@@ -1,7 +1,7 @@
 {
   "product": "Chimeric",
   "kind": "integration-source",
-  "version": "0.3.0-rc.8",
+  "version": "0.3.0-rc.9",
   "channel": "prerelease",
   "originalRuntimeIncluded": false,
   "privateProfileIncluded": false,
@@ -35,7 +35,7 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "a5c37711275227a448f4dd8a8700e9c590c609fdb8e28abf3e547a1280eb0a28"
+      "sha256": "559a1bc67a6b94a39d86df4ba6fcda1d7084681cc04c18e96922f52768411500"
     },
     {
       "path": "CONTRIBUTING.md",
@@ -55,11 +55,11 @@
     },
     {
       "path": "README.ja.md",
-      "sha256": "10d7c194ae174fa5623774d5f4b2cd8eaa090c04e29cd4504e98dd94d56faa45"
+      "sha256": "2daa2375aebdd9337c9e33acfb26e47f810318ca11476d955a779d74bae54ee2"
     },
     {
       "path": "README.md",
-      "sha256": "6e65a11d9e8e8791b092e65ba23173d3ec68c9b51f7e09480be5679f1d369b41"
+      "sha256": "935388c470cd6bfe9aa5240a5c7ef1d161d4babcf5f758614dd71d8b3a771f9a"
     },
     {
       "path": "SECURITY.md",
@@ -83,7 +83,7 @@
     },
     {
       "path": "docs/CLASS2-VALIDATION.md",
-      "sha256": "4565e240199bf5e2d1f1475a177e4390e72d6f5b9fe60024eba0fbfc53410c56"
+      "sha256": "2814fa4c349ae70945679df3f9b0d4fc284b4e4a8426fb30da75a720bd27aba2"
     },
     {
       "path": "docs/CLASSIFIERS.md",
@@ -123,15 +123,15 @@
     },
     {
       "path": "docs/PROVIDERS.md",
-      "sha256": "24bd6498e3ac4385afbf032934252d2b1a9513d759baf4539fe45bd8c89424bc"
+      "sha256": "c61f04f9949df2cc241a1e2e314e27faa11e72af58e88ad78e4a4b28798858cd"
     },
     {
       "path": "docs/RELEASE-AUDIT.md",
-      "sha256": "0420311134891c3e01cdc9410758eef637702523101563172f8cb9d1a932d7ed"
+      "sha256": "241aef7bd82c55e2eaae31da1e7e7b5eaae2296df684a78de16e334d54313ac3"
     },
     {
       "path": "docs/RELEASE-READINESS.md",
-      "sha256": "50efbb028fb5f01b9b8e7839762209934e60af8a28d6ce26de04f4b77d5be8fd"
+      "sha256": "2b03faca583da82f69f804a00d50b677c540aaedcd6d01f1b8f5ee53897a95ee"
     },
     {
       "path": "docs/SCIENTIFIC-SKILLS.md",
@@ -143,7 +143,7 @@
     },
     {
       "path": "docs/SOURCE-VERIFICATION.json",
-      "sha256": "f0cf752cd4646948f41b89968ff1a4c2ef9c1e06fb9f9ddc9fac5e1f03d3afa9"
+      "sha256": "abe3797fb80d17ed24f11903644f25de634c2016029786d45e668d014b07d004"
     },
     {
       "path": "docs/USAGE-AND-PRICING.md",
@@ -151,7 +151,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "074451bf01a47f3a013a8599cc58516e52bd55d661e2807d1a9c194dd0572c68"
+      "sha256": "1d59a52e79e9d714e16ebd7c850fd283b4dfb21a580c9f10a6bf017981392835"
     },
     {
       "path": "providers.example.json",
@@ -159,7 +159,7 @@
     },
     {
       "path": "release-status.json",
-      "sha256": "8c54fc7ab4d8520c80bca18650c3a02d75db9d02ca448b2b932ef1953280b7fa"
+      "sha256": "43724aeac8cfac79ba2ca592304bda3eeacbda5144d0872bc9098baca901beb3"
     },
     {
       "path": "release.manifest.json",
@@ -279,11 +279,11 @@
     },
     {
       "path": "src/bridge.ts",
-      "sha256": "dede2ea9b75177c9643b95224b33e96216682f99f30068e4a961848360d4e151"
+      "sha256": "7f62679f232035ed809532822c0b97024f5609e1107aba86165ca12d8552cfbf"
     },
     {
       "path": "src/catalog.ts",
-      "sha256": "2552051d9135bc30c71a809e393e0f2bdc5c5f193807be71ce1fb7652e988a3a"
+      "sha256": "d48c192bb1696d9828cc77956835180867c70a7b2f1b802390125c17885cb824"
     },
     {
       "path": "src/chatgpt-credentials.js",
@@ -326,12 +326,16 @@
       "sha256": "99d5dcaf48a0aed389ba5a586c9688175424c88d0ca9367b5d688aa7bee5b867"
     },
     {
+      "path": "src/claude-code-model-discovery.ts",
+      "sha256": "e5f848eaf1c72d9a8015505f9d7ed91f877da2e4377fe19940ac756d8eb2b361"
+    },
+    {
       "path": "src/claude-code-provider.ts",
-      "sha256": "2359105ee5872df50306cc36d111452a50f510f51ea987fca74db4ea2c1f2ab0"
+      "sha256": "c740b6c295a85871457c0f0cb5f9eec1b8a4a6a14ef27aee03e5f382c8b0df81"
     },
     {
       "path": "src/claude-code.ts",
-      "sha256": "4100d58fa70bab15eb570f70d0f04d2143ba04bf8a6f66cf1a379c19b6d313e0"
+      "sha256": "f1ebe37b0f51544e5bb9c81ade6e02a78080dc3f54f73766f19a3f265c59f1c5"
     },
     {
       "path": "src/confidentiality-manager.ts",
@@ -379,7 +383,7 @@
     },
     {
       "path": "src/ja.json",
-      "sha256": "4b8e1a418f4225d205a3b36be868b315f606accd3b38604bfe6811d320f3835c"
+      "sha256": "907c0ca1696cfbc8989d27ea273d9946ba2311f3076c4750af0ff71870619ae3"
     },
     {
       "path": "src/local-gate.ts",
@@ -391,7 +395,7 @@
     },
     {
       "path": "src/local-runtime.ts",
-      "sha256": "ef6687785027cac67f3648d9457413956fac3b0808cf997a161c81913f4ea4a3"
+      "sha256": "bfaf506661cf16ed0fc26184e811a1db74a651fb6b7ea314c29b97a1e0247880"
     },
     {
       "path": "src/localization.ts",
@@ -483,7 +487,7 @@
     },
     {
       "path": "src/protocol.ts",
-      "sha256": "d689192b1939016b47d8e163db0e21f0bae4a5fe60d4ce8352817c22438fb21c"
+      "sha256": "a79e47ada8867a6a7ecaf330d0b2af2ede9a6badc80146a775e75f635445c2d2"
     },
     {
       "path": "src/provider-events.js",
@@ -491,7 +495,7 @@
     },
     {
       "path": "src/provider-manager.ts",
-      "sha256": "6fddad5e2d021548be8215c298be31eb603089039181c004b3a33dae3f29533e"
+      "sha256": "c54c84f3f77f4c5e0455bc3e9dfd63acec951cb54fad08501c380b5fa0bb01df"
     },
     {
       "path": "src/provider-secrets.ts",
@@ -499,7 +503,7 @@
     },
     {
       "path": "src/provider-settings.js",
-      "sha256": "7c44b63899221a7ce89fb12bb0f667a46397723fb96ed3e80a4b7618b5273b9f"
+      "sha256": "4f9a3fafd45f4e4f82f1804c30261b50d44f5bdbebbadf1593ffdc269d840198"
     },
     {
       "path": "src/provider-transport.ts",
@@ -511,7 +515,7 @@
     },
     {
       "path": "src/registry.ts",
-      "sha256": "bc39a10feffe4ed930ea7c56611e0327368fa995b7f89707256b84aae2c9ddfb"
+      "sha256": "25f7f731ce9cd60aa0b50d1fd6592d375315cfb22ce7d647aebe0c448a022b58"
     },
     {
       "path": "src/resource-http.ts",
@@ -576,6 +580,14 @@
     {
       "path": "src/vendor-hosts.ts",
       "sha256": "fbef3d9fd469e8b3e502f1afd90c7ab036cadd6bed4bd129700db5084825046a"
+    },
+    {
+      "path": "src/version-http.ts",
+      "sha256": "24eabb9eb92d4926d280ea45f23392fd8dc6594eac611e0fb6a37464b2f92d27"
+    },
+    {
+      "path": "src/version-settings.js",
+      "sha256": "396d7842a0db977f675c2f0bd316b37867f8330b2c6d8087532f02351751b1db"
     },
     {
       "path": "src/voice-settings.js",
@@ -675,7 +687,7 @@
     },
     {
       "path": "tests/catalog.test.ts",
-      "sha256": "2b08047076de107e8b81f16a55f90b4a34dd6c65da7af1584620772f7676d1fd"
+      "sha256": "5cfe25e5e9695c88affd5201eed772702258e126aeb8cee893c6c2cb1cd15b07"
     },
     {
       "path": "tests/class2-http.test.ts",
@@ -690,12 +702,16 @@
       "sha256": "28d3b44ccef4fb7d4ba5fc6bd20c048a9e90f57613624c7be293d0da0f1ba33d"
     },
     {
+      "path": "tests/claude-code-model-discovery.test.ts",
+      "sha256": "3856ddc3d4a11bf95ee1ebfd7609ffe51ebbaf11694f33daf81518ba84c0944e"
+    },
+    {
       "path": "tests/claude-code-provider.test.ts",
-      "sha256": "1341a70e25b674ea67f7eb095911db7e9cfe54604503bcee862b4fba09fc5991"
+      "sha256": "b8b655cb2a27961f34ff30bbb27c720d50a1d26b18db4d257286ffb1bde05f30"
     },
     {
       "path": "tests/claude-code.test.ts",
-      "sha256": "54cd7f1a8a993bb1ef3c2a400f1078604972e7cae112d0a358af3a265c1a9fbc"
+      "sha256": "4b7ad6e2408d828718aa2df79b553f186c0a08ab83d977045fd4267c8062db79"
     },
     {
       "path": "tests/confidentiality-adversarial.test.ts",
@@ -707,11 +723,15 @@
     },
     {
       "path": "tests/connection-settings.test.ts",
-      "sha256": "9da0aed6490e08b3d2552ac0def4eb79649ddf7cae2f8ddeed695d3172891670"
+      "sha256": "4b6c1d20d63ec96091c45a41ea8d8f7e72dba30668ebf8853d53cf8adbb7d482"
     },
     {
       "path": "tests/content.test.ts",
       "sha256": "45cd28a30718b70eacb4874a99272b4463a33d298f2dd6ccb981833693d85e3c"
+    },
+    {
+      "path": "tests/context-usage.test.ts",
+      "sha256": "8f93dc906693ee49e2501815c08577f22e695f703c2f72ae38b6a24ce30dd7bd"
     },
     {
       "path": "tests/decision-http.test.ts",
@@ -807,11 +827,11 @@
     },
     {
       "path": "tests/fixtures/claude-code-cli.mjs",
-      "sha256": "aaf1d50691539e8b214bece66607a533963d8aec14e6e7314715158b3b06fec0"
+      "sha256": "180a1c3891d75b34298ddd251bc96df438986d5fe1ec323483cae6a07d4312c0"
     },
     {
       "path": "tests/frontend-connections.test.ts",
-      "sha256": "df9424dc91e9bf7114699bbb20a40d1cbf5ed6d6845116823e7fc9bfeb32c4d3"
+      "sha256": "9eedfe02e1c5b6de3c639ab6badd65463a2e82d1225d9bb3c9175a86982da5dd"
     },
     {
       "path": "tests/frontend-login.test.ts",
@@ -995,7 +1015,7 @@
     },
     {
       "path": "tests/providers.test.ts",
-      "sha256": "7abb925db729e293f5511bc4e3bdef9d42e22d14d4d933e5c8e937ec5bf52a63"
+      "sha256": "c6623b6c60aa70ddac26f83694c74af8b8e11dcd5730b24024876c77170a129a"
     },
     {
       "path": "tests/resource-http.test.ts",
@@ -1008,6 +1028,10 @@
     {
       "path": "tests/resource-views.test.ts",
       "sha256": "cfa88a25d562265bb7aa0ae2ac718b88910552ac0456b638ba1747691e8d49cd"
+    },
+    {
+      "path": "tests/selector-visibility.test.ts",
+      "sha256": "a784539213c3678e4fccf3cc5291461e62857d6d2d12f0373a3d79edc26c19f4"
     },
     {
       "path": "tests/session-policy.test.ts",
@@ -1086,6 +1110,10 @@
       "sha256": "0d5d99672ece31a66d99f38c2565e98e0422c3ac8e0706f1503a2a8ee3d1a8b2"
     },
     {
+      "path": "tests/version-info.test.ts",
+      "sha256": "9bbdcc3f2d95308832b8234f40ea96af6b95d4902c0efa480b068c1e177b54d9"
+    },
+    {
       "path": "tests/voice-settings.test.ts",
       "sha256": "63f4902cf0434d1105c320772be1b0aa4df1c5f25c66707a954c4f4b8558500a"
     },
@@ -1111,7 +1139,7 @@
     },
     {
       "path": "tools/brand-frontend.mjs",
-      "sha256": "429595c6f6baddadef22d7ce61149bb4154af0ecbaa449224e1e825a075eb0ba"
+      "sha256": "38de5fd9ff7ace31e8e8b7df27e6197f18be39f943a661c226fb6cb1da4463ce"
     },
     {
       "path": "tools/brand_product_resources.py",
@@ -1123,7 +1151,7 @@
     },
     {
       "path": "tools/build-frontend.py",
-      "sha256": "8bd61bac51db592373aab969e0bea92108890b30a97e46c0e3616d51926ca218"
+      "sha256": "85339ffc506befbcc2cfdaaad67849451746334b29c201f16d33d1dea9e82b82"
     },
     {
       "path": "tools/build-macos-app.py",
@@ -1131,11 +1159,11 @@
     },
     {
       "path": "tools/build-portable.py",
-      "sha256": "2023ba7c3a70304b6e8c0a825157652243171c932907532dc236d0c444dc9776"
+      "sha256": "88e066ab12743c342f4736816dff21241757aa00afae9c9dd85a7e84b4329362"
     },
     {
       "path": "tools/build-runtime.ts",
-      "sha256": "67f7928d73bca9d9e8c7173c1e5a33949e5913ef81be3914dfc5dc843d04c1da"
+      "sha256": "24b76fd1f99c03625cb320a20494b8cf01930d27e08afc44b89a836999cfbecb"
     },
     {
       "path": "tools/bundled_science_skills.py",

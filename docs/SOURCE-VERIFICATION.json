@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
-  "version": "0.3.0-rc.8",
+  "version": "0.3.0-rc.9",
   "reviewedOn": "2026-11-22",
   "scope": "Public integration source, clean-export regression tests, dependency closure and bounded official-client subscription checks. Packaged platform and protected-data gates remain separate.",
   "cleanExport": {
-    "selectedSourceFiles": 308,
+    "selectedSourceFiles": 315,
     "bun": {
-      "passed": 991,
+      "passed": 1036,
       "skipped": 68,
       "failed": 0,
-      "assertions": 5799,
-      "files": 103
+      "assertions": 6167,
+      "files": 107
     },
     "python": {
       "total": 69,
@@ -29,9 +29,9 @@
   },
   "anthropicSubscription": {
     "focusedTests": {
-      "passed": 58,
+      "passed": 53,
       "failed": 0,
-      "assertions": 385
+      "assertions": 354
     },
     "officialClientVersion": "2.1.322",
     "signatureVerified": true,
@@ -45,7 +45,75 @@
       "input": "Synthetic fixed text only; no research content."
     },
     "installedConnectionReady": true,
-    "savedResearchCountsPreserved": true
+    "savedResearchCountsPreserved": true,
+    "modelDiscovery": {
+      "transport": "official-client metadata-only initialization",
+      "sendsChatPrompt": false,
+      "accountAndClientBound": true,
+      "refreshSupported": true,
+      "observedModels": [
+        "Default (Opus 5.5)",
+        "Opus 5.5",
+        "Sonnet 5.5",
+        "Fable 5.2",
+        "Haiku 5.5"
+      ],
+      "contextTokens": 1000000,
+      "maximumOutputTokens": 128000,
+      "explicitClientLimitsTakePrecedence": true,
+      "unknownModelVersionsAreNotAssignedReviewedLimits": true
+    },
+    "imageInput": {
+      "declaredFormats": [
+        "PNG",
+        "JPEG",
+        "GIF",
+        "WebP"
+      ],
+      "perImageByteLimit": 5242880,
+      "totalTransportByteLimit": 8388608,
+      "maximumImagesOrDocumentPages": 100,
+      "preservesOriginalMessageAndToolResultAssociation": true,
+      "perModelDeclarationsAreNotIndividualLiveProbeResults": true,
+      "liveChecks": {
+        "model": "claude-haiku-5-5",
+        "clientVersion": "2.1.322",
+        "reasoningEffort": "low",
+        "maximumOutputTokensPerCall": 512,
+        "syntheticPngColor": "red",
+        "syntheticPdfCodeReadCorrectly": true,
+        "pdfUsedActualContentReaderAndToContext": true,
+        "pdfIncludedExtractedTextAndRenderedPage": true,
+        "toolCalls": 0,
+        "researchDataUsed": false,
+        "apiBillingFallback": false
+      }
+    },
+    "outputBudget": {
+      "enforcedUsing": "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+      "inferenceChildOnly": true,
+      "clampedToDeclaredModelMaximum": true,
+      "scope": "Each underlying inference call; cumulative CLI run output can include multiple calls."
+    },
+    "contextAccounting": {
+      "aggregateUsageRetainedForBilling": true,
+      "latestTopLevelPromptUsedForNativeCompaction": true,
+      "cachedInputIncluded": true,
+      "tests": {
+        "passed": 34,
+        "failed": 0,
+        "assertions": 196
+      },
+      "covers": [
+        "SSE",
+        "non-streaming",
+        "replay persistence",
+        "usage indicator totals",
+        "server-tool continuations",
+        "legacy provider behavior",
+        "malformed token accounting"
+      ]
+    }
   },
   "securityScan": {
     "scope": "Final integration-source export and source ZIP only. The exact scan result and archive checksum are published as release assets VERIFICATION.json and SHA256SUMS. Historical app scans are not reused for these bytes."
@@ -55,5 +123,53 @@
     "passed": 7,
     "failed": 0,
     "scope": "Only the exact installed Chimeric executable and workspace can be stopped; ancestor shells and unrelated commands are excluded, including paths with spaces."
+  },
+  "connectionsScroll": {
+    "focusedTests": {
+      "passed": 3,
+      "failed": 0,
+      "assertions": 88
+    },
+    "browserCasesPassed": 8,
+    "viewportHeights": [
+      640,
+      1000
+    ],
+    "settingsBeforeWheelScrollTop": 0,
+    "settingsAfterWheelScrollTop": 500,
+    "modalScrollingPreserved": true,
+    "source": "Actual shared Connections component and installed app CSS in isolated sandboxed stable Chrome; synthetic connections only."
+  },
+  "nativeContextBudget": {
+    "source": "Isolated execution of actual installed native budget hooks with a qualified Claude model and synthetic metadata.",
+    "contextTokens": 1000000,
+    "maximumOutputTokens": 128000,
+    "usableInputCapacity": 872000,
+    "explicitLowerCeilingRespected": true,
+    "upstream200kClampDisabledByExistingCheckedHook": true,
+    "compactionPolicy": "The native Chimeric research harness reserves output space and keeps its own compaction policy; this does not import persistent Claude Code session compaction."
+  },
+  "selectorVisibility": {
+    "focusedTests": {
+      "passed": 18,
+      "failed": 0,
+      "assertions": 135
+    },
+    "nonChatAndUnavailableModelsNotOffered": true,
+    "perModelShowInSelectorSeparateFromPin": true,
+    "hideUnpinsAndPinMakesVisible": true,
+    "perSessionSelectedModelLabelsAndEffortsRetained": true,
+    "staleSavedReferencesPreservedAcrossUnrelatedChanges": true,
+    "dedicatedImageAndSpeechRegistriesPreserved": true,
+    "actualNativeCheckboxRoundTripPassed": true
+  },
+  "modelPinning": {
+    "qualifiedClaudeIdsPreserved": true,
+    "actualNativePinAndUnpinRoundTripPassed": true
+  },
+  "visibleAppVersion": {
+    "version": "0.3.0-rc.9",
+    "nativeGeneralSettingsChecked": true,
+    "authenticatedVersionEndpointChecked": true
   }
 }

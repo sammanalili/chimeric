@@ -130,8 +130,21 @@ export function toNativeContent(message: AssistantMessage): any[] {
   return blocks;
 }
 
+/** A single provider request's context occupancy, distinct from a CLI run's
+ * aggregate billed usage. Keep this enumerable so structured clones and the
+ * local replay store retain the boundary. It is never part of the wire body. */
+export type ContextUsage = Readonly<{input:number;output:number;cacheRead:number;cacheWrite:number}>;
+export type ContextUsageMessage = AssistantMessage & {contextUsage?:ContextUsage};
+export function messageContextUsage(message:AssistantMessage):ContextUsage|undefined {
+  const value=(message as ContextUsageMessage).contextUsage;
+  if(value===undefined)return;
+  if(!value||typeof value!=='object'||Array.isArray(value)||(['input','output','cacheRead','cacheWrite'] as const).some(key=>!Number.isSafeInteger(value[key])||value[key]<0))
+    throw new Error('Provider returned invalid context token accounting.');
+  return {input:value.input,output:value.output,cacheRead:value.cacheRead,cacheWrite:value.cacheWrite};
+}
 export function nativeUsage(message: AssistantMessage) {
-  return { input_tokens: message.usage.input, output_tokens: message.usage.output, cache_read_input_tokens: message.usage.cacheRead, cache_creation_input_tokens: message.usage.cacheWrite };
+  const usage=messageContextUsage(message)??message.usage;
+  return { input_tokens: usage.input, output_tokens: usage.output, cache_read_input_tokens: usage.cacheRead, cache_creation_input_tokens: usage.cacheWrite };
 }
 export function nativeMessage(message: AssistantMessage, requested: string, id: string) {
   if (["error", "aborted", "deferred"].includes(message.stopReason)) throw new Error(message.errorMessage ?? "provider did not complete a synchronous turn");
